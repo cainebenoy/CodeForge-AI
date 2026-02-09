@@ -2,18 +2,25 @@
 Request ID middleware
 Adds unique request identifier for tracing
 """
+
+import time
 import uuid
+
 from fastapi import Request
+from starlette.responses import Response
+
 from app.core.logging import logger
 
 
-async def request_id_middleware(request: Request):
+async def request_id_middleware(request: Request, call_next) -> Response:
     """
     Add request ID to each request for tracing
     Stored in request.state for access in handlers
     """
     request.state.request_id = str(uuid.uuid4())
-    request.state.start_time = 0
+    request.state.start_time = time.time()
+    response = await call_next(request)
+    return response
 
 
 async def logging_middleware(request: Request, call_next):

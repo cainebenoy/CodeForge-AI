@@ -2,11 +2,12 @@
 Logging configuration for the application
 Provides structured logging with proper context
 """
-import logging
+
 import json
-from typing import Any, Dict
-from logging.handlers import RotatingFileHandler
+import logging
 import sys
+from logging.handlers import RotatingFileHandler
+from typing import Any, Dict
 
 from app.core.config import settings
 
@@ -51,6 +52,9 @@ def setup_logging() -> logging.Logger:
 
     # File handler (only in production)
     if settings.ENVIRONMENT == "production":
+        import os
+
+        os.makedirs("logs", exist_ok=True)
         file_handler = RotatingFileHandler(
             "logs/codeforge.log",
             maxBytes=10 * 1024 * 1024,  # 10MB

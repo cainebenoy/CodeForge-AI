@@ -1,9 +1,11 @@
 """
 Tests for input validation service
 """
+
 import pytest
-from app.services.validation import InputValidator
+
 from app.core.exceptions import ValidationError
+from app.services.validation import InputValidator
 
 
 def test_sanitize_string_valid():
@@ -16,7 +18,7 @@ def test_sanitize_string_exceeds_max_length():
     """Test string exceeding max length"""
     with pytest.raises(ValidationError) as exc_info:
         InputValidator.sanitize_string("x" * 1001, max_length=1000)
-    assert "exceeds max length" in str(exc_info.value)
+    assert "exceeds max length" in exc_info.value.details["reason"]
 
 
 def test_validate_uuid_valid():

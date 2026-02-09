@@ -1,50 +1,64 @@
 """
 QA Agent - "Testing Specialist Persona"
 Validates generated code for errors and best practices
+Uses LangChain LCEL with PydanticOutputParser for structured review output
 """
-from langchain.prompts import ChatPromptTemplate
+
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.core.llm import get_optimal_model
+from app.agents.prompts import get_agent_prompt
+from app.core.logging import logger
+from app.schemas.protocol import QAResult
 
 
-QA_AGENT_PROMPT = """You are a Senior QA Engineer reviewing code.
-
-Code to review:
-{code}
-
-File: {file_path}
-
-Check for:
-1. Syntax errors
-2. TypeScript errors
-3. React hooks rules violations
-4. Security vulnerabilities (hard-coded secrets, XSS)
-5. Best practices violations
-
-Provide a structured report with severity levels.
-"""
-
-
-async def run_qa_agent(code: str, file_path: str) -> dict:
+async def run_qa_agent(code: str, file_path: str) -> QAResult:
     """
     QA Agent execution
-    
-    Returns: Dict with issues found and severity
+
+    Reviews code for quality, security, and best practices.
+
+    Args:
+        code: The code content to review
+        file_path: Path of the file being reviewed
+
+    Returns:
+        QAResult — Pydantic-enforced with issues, severity, and score
+
+    Security:
+        - Checks for hard-coded secrets
+        - Validates security patterns
     """
+    logger.info(f"Running QA Agent for file: {file_path}")
+
     llm = get_optimal_model("qa")
-    
-    prompt = ChatPromptTemplate.from_template(QA_AGENT_PROMPT)
-    
-    chain = prompt | llm
-    
-    result = await chain.ainvoke({
-        "code": code,
-        "file_path": file_path,
-    })
-    
-    # Parse result into structured format
-    return {
-        "file": file_path,
-        "issues": [],  # Parse from LLM response
-        "passed": True,
-    }
+    parser = PydanticOutputParser(pydantic_object=QAResult)
+
+    system_prompt = get_agent_prompt("qa")
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt + "\n\n{format_instructions}"),
+            (
+                "human",
+                "File: {file_path}\n\nCode to review:\n```\n{code}\n```\n\n"
+                "Review this code thoroughly and provide a structured report "
+                "with issues, severity levels, and a quality score.",
+            ),
+        ]
+    )
+
+    chain = prompt | llm | parser
+
+    result = await chain.ainvoke(
+        {
+            "code": code,
+            "file_path": file_path,
+            "format_instructions": parser.get_format_instructions(),
+        }
+    )
+
+    logger.info(
+        f"QA Agent completed: passed={result.passed}, score={result.score}, issues={len(result.issues)}"
+    )
+    return result

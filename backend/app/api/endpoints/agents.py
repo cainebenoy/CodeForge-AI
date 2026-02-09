@@ -2,21 +2,24 @@
 Agent API endpoints
 Handles agent job management: triggering, polling, and completion
 """
-from fastapi import APIRouter, BackgroundTasks, Depend
-from uuid import uuid4
-from typing import Optional
 
+from typing import Optional
+from uuid import uuid4
+
+from fastapi import APIRouter, BackgroundTasks, Depends
+
+from app.core.auth import CurrentUser, get_current_user
+from app.core.exceptions import ResourceNotFoundError, ValidationError
+from app.core.logging import logger
 from app.schemas.protocol import (
     AgentRequest,
     AgentResponse,
+    AgentType,
     JobStatus,
     JobStatusType,
-    AgentType,
 )
 from app.services.job_queue import job_store
 from app.services.validation import InputValidator
-from app.core.logging import logger
-from app.core.exceptions import ResourceNotFoundError, ValidationError
 
 router = APIRouter(tags=["agents"])
 
@@ -28,6 +31,7 @@ async def validate_agent_request(request: AgentRequest) -> AgentRequest:
 
     # Context size validation
     import json
+
     context_size = len(json.dumps(request.input_context))
     if context_size > 50000:
         raise ValidationError("input_context", "Context exceeds 50KB limit")
@@ -41,7 +45,8 @@ async def validate_agent_request(request: AgentRequest) -> AgentRequest:
 
 @router.post("/run-agent", response_model=AgentResponse)
 async def run_agent(
-    request: AgentRequest = Depend(validate_agent_request),
+    request: AgentRequest = Depends(validate_agent_request),
+    user: CurrentUser = Depends(get_current_user),
     background_tasks: BackgroundTasks = None,
 ) -> AgentResponse:
     """
@@ -64,6 +69,11 @@ async def run_agent(
     job_id = str(uuid4())
 
     try:
+        # Verify user owns the project before running agent
+        from app.services.database import DatabaseOperations
+
+        await DatabaseOperations.get_project(request.project_id, user_id=user.id)
+
         # Sanitize context
         sanitized_context = InputValidator.sanitize_dict(request.input_context)
 
@@ -110,7 +120,10 @@ async def run_agent(
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
-async def get_job_status(job_id: str) -> JobStatus:
+async def get_job_status(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user),
+) -> JobStatus:
     """
     Get the status of an agent job
 
@@ -151,7 +164,11 @@ async def get_job_status(job_id: str) -> JobStatus:
 
 
 @router.get("/jobs/{project_id}/list")
-async def list_project_jobs(project_id: str, limit: int = 50):
+async def list_project_jobs(
+    project_id: str,
+    limit: int = 50,
+    user: CurrentUser = Depends(get_current_user),
+):
     """
     List all jobs for a project
 

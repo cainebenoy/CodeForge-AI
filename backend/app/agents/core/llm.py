@@ -1,55 +1,64 @@
 """
-LLM Model Router - selects optimal model for each task
-Optimizes cost vs. intelligence
+LLM Model Router - Single source of truth for model selection
+Routes each agent type to the optimal LangChain LLM instance
+Optimizes cost vs. intelligence vs. context window
 """
+
 from typing import Literal
-from langchain_openai import ChatOpenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
+
 from langchain_anthropic import ChatAnthropic
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 
 from app.core.config import settings
+from app.core.logging import logger
 
 AgentType = Literal["research", "wireframe", "code", "qa", "pedagogy"]
 
 
 def get_optimal_model(agent_type: AgentType):
     """
-    Route requests to the best LLM for the task
-    
-    Strategy:
-    - Research/QA: GPT-4o or Claude (high reasoning)
-    - Code: Gemini 1.5 Pro (large context ~1M tokens)
-    - Routing: Gemini Flash (cheap, fast)
+    Route requests to the best LLM for the task.
+
+    Strategy (per copilot-instructions.md):
+    - Research/QA: GPT-4o (high reasoning for requirements analysis & code review)
+    - Code: Gemini 1.5 Pro (1M token context window for full file awareness)
+    - Wireframe: GPT-4o (structured architecture understanding)
+    - Pedagogy: Claude 3.5 Sonnet (best at Socratic explanation)
+
+    Returns:
+        LangChain ChatModel instance configured for the task
     """
-    
+    logger.debug(f"Selecting model for agent type: {agent_type}")
+
     if agent_type in ["research", "qa"]:
-        # High intelligence tasks
+        # High intelligence tasks — reasoning & analysis
         return ChatOpenAI(
             model="gpt-4o",
             temperature=0.7,
             api_key=settings.OPENAI_API_KEY,
         )
-    
+
     elif agent_type == "code":
-        # Large context for full file awareness
+        # Large context for full file awareness (1M tokens)
         return ChatGoogleGenerativeAI(
             model="gemini-1.5-pro",
             temperature=0.3,
             google_api_key=settings.GOOGLE_API_KEY,
         )
-    
+
     elif agent_type == "wireframe":
-        # Structured output
+        # Structured output for architecture design
         return ChatOpenAI(
             model="gpt-4o",
             temperature=0.5,
             api_key=settings.OPENAI_API_KEY,
         )
-    
+
     else:  # pedagogy
-        # Socratic guidance
+        # Socratic guidance — Claude excels at patient explanation
         return ChatAnthropic(
-            model="claude-3-5-sonnet-20240620",
+            model="claude-3-5-sonnet-20241022",
             temperature=0.8,
             anthropic_api_key=settings.ANTHROPIC_API_KEY,
         )

@@ -2,17 +2,20 @@
 CodeForge AI Backend - FastAPI Application Entry Point
 Handles app initialization, error handling, middleware setup, and event lifecycle
 """
+
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
 
 from app.api.router import api_router
 from app.core.config import settings
-from app.core.logging import logger
 from app.core.exceptions import CodeForgeException
-from app.middleware.request_tracking import request_id_middleware, logging_middleware
+from app.core.logging import logger
+from app.middleware.rate_limiter import rate_limit_middleware
+from app.middleware.request_tracking import logging_middleware, request_id_middleware
 
 
 @asynccontextmanager
@@ -21,9 +24,9 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info(f"Starting CodeForge AI Backend ({settings.ENVIRONMENT})")
     logger.info(f"Log level: {settings.LOG_LEVEL}")
-    
+
     yield
-    
+
     # Shutdown
     logger.info("Shutting down CodeForge AI Backend")
 
@@ -38,10 +41,19 @@ app = FastAPI(
     redoc_url="/redoc" if settings.ENVIRONMENT == "development" else None,
 )
 
-# Middleware stack (order matters)
-# 1. Request tracking (must be first to capture all requests)
+# Middleware stack (order matters — last registered runs first)
+# 1. Request tracking (must be outermost to capture all requests)
 app.middleware("http")(request_id_middleware)
 app.middleware("http")(logging_middleware)
+
+
+# 2. Rate limiting — enforces per-IP and per-user request limits
+@app.middleware("http")
+async def _rate_limit_middleware(request: Request, call_next):
+    """Rate limit middleware wrapper that calls next handler"""
+    await rate_limit_middleware(request)
+    return await call_next(request)
+
 
 # 2. CORS middleware - HTTPS only in production
 app.add_middleware(
@@ -80,12 +92,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     logger.warning(f"Validation error: {exc}")
     errors = []
     for error in exc.errors():
-        errors.append({
-            "field": ".".join(str(x) for x in error["loc"][1:]),
-            "message": error["msg"],
-            "type": error["type"],
-        })
-    
+        errors.append(
+            {
+                "field": ".".join(str(x) for x in error["loc"][1:]),
+                "message": error["msg"],
+                "type": error["type"],
+            }
+        )
+
     return JSONResponse(
         status_code=422,
         content={
@@ -100,13 +114,13 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def general_exception_handler(request: Request, exc: Exception):
     """Handle unexpected exceptions"""
     logger.error(f"Unexpected error: {type(exc).__name__} - {str(exc)}")
-    
+
     # Don't expose internal errors in production
     if settings.ENVIRONMENT == "production":
         message = "Internal server error"
     else:
         message = str(exc)
-    
+
     return JSONResponse(
         status_code=500,
         content={

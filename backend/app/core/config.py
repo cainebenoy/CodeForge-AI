@@ -2,8 +2,10 @@
 Application configuration using Pydantic Settings
 Loads from environment variables with validation
 """
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
 from typing import List
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -25,6 +27,7 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: str
     SUPABASE_SERVICE_KEY: str  # Service role key - never expose to client
+    SUPABASE_JWT_SECRET: str  # JWT secret for verifying user tokens
 
     # LLM API Keys - loaded from env, never hard-coded
     OPENAI_API_KEY: str
