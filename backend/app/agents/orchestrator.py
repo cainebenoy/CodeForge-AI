@@ -1,11 +1,14 @@
 """
-Agent Orchestrator - coordinates agent workflows
-Delegates to LangChain-based agents with Pydantic-enforced outputs
-Handles timeouts, error handling, and database persistence
+Agent Orchestrator - coordinates agent workflows via LangGraph
+
+Routes agent requests through LangGraph StateGraph pipelines.
+Supports both single-agent execution and multi-step builder pipelines
+with Code→QA retry loops.
+
+Handles timeouts, error handling, database persistence, and progress tracking.
 """
 
 import asyncio
-import json
 from typing import Any, Dict, Optional
 
 from app.core.config import settings
@@ -26,16 +29,18 @@ AGENT_RESULT_COLUMN_MAP = {
 async def run_agent_workflow(
     job_id: str,
     request: AgentRequest,
+    progress_callback=None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Execute agent workflow asynchronously with proper error handling and timeouts
+    Execute agent workflow via LangGraph with proper error handling and timeouts.
 
-    Delegates to the LangChain-based agent implementations which enforce
-    Pydantic schemas on all LLM outputs — preventing hallucinated JSON structures.
+    Uses LangGraph StateGraph to route to the correct agent node(s).
+    Supports single-agent runs and full builder pipelines.
 
     Args:
         job_id: Unique job identifier
         request: Agent request with type and context
+        progress_callback: Optional async callback(progress, node_name)
 
     Returns:
         Agent result dictionary (Pydantic model serialized to dict)
@@ -47,6 +52,12 @@ async def run_agent_workflow(
         - Error messages sanitized (no stack traces to client)
         - Database operations use RLS
     """
+    from app.agents.graph.workflows import (
+        SINGLE_AGENT_RESULT_KEYS,
+        build_single_agent_graph,
+        get_initial_state,
+    )
+
     logger.info(f"Starting agent workflow: job={job_id}, type={request.agent_type}")
 
     # Timeout configuration per agent type (seconds)
@@ -60,17 +71,30 @@ async def run_agent_workflow(
     timeout = timeouts.get(request.agent_type, settings.AGENT_TIMEOUT)
 
     try:
-        # Route to appropriate LangChain agent with timeout
-        result = await asyncio.wait_for(
-            _dispatch_agent(request),
+        # Build LangGraph and initial state
+        graph = build_single_agent_graph(
+            agent_type=request.agent_type,
+            callback=progress_callback,
+        )
+        initial_state = get_initial_state(
+            project_id=request.project_id,
+            agent_type=request.agent_type,
+            input_context=request.input_context,
+            job_id=job_id,
+        )
+
+        # Execute graph with timeout
+        final_state = await asyncio.wait_for(
+            graph.ainvoke(initial_state),
             timeout=timeout,
         )
 
-        # Serialize Pydantic model to dict for storage
-        if hasattr(result, "model_dump"):
-            result_dict = result.model_dump()
-        else:
-            result_dict = result
+        # Extract the result from the correct state key
+        result_key = SINGLE_AGENT_RESULT_KEYS.get(request.agent_type)
+        result_dict = final_state.get(result_key) if result_key else None
+
+        if result_dict is None:
+            raise AgentExecutionError(request.agent_type, "Agent produced no result")
 
         # Store result in database if it maps to a DB column
         db_column = AGENT_RESULT_COLUMN_MAP.get(request.agent_type)
@@ -100,59 +124,81 @@ async def run_agent_workflow(
         raise AgentExecutionError(request.agent_type, error_msg)
 
 
-async def _dispatch_agent(request: AgentRequest) -> Any:
+async def run_builder_pipeline(
+    job_id: str,
+    project_id: str,
+    input_context: Dict[str, Any],
+    progress_callback=None,
+) -> Dict[str, Any]:
     """
-    Dispatch to the correct LangChain-based agent.
+    Execute the full builder pipeline: research → wireframe → code → qa (with retry).
 
-    Each agent uses PydanticOutputParser for enforced structured output.
-    This is the SINGLE dispatch point — no duplicate LLM call logic.
+    This is the multi-step workflow that generates a complete project from an idea.
+    The Code→QA loop retries up to MAX_AGENT_ITERATIONS times if QA fails.
+
+    Args:
+        job_id: Unique job identifier
+        project_id: UUID of the project
+        input_context: Must contain 'user_idea' at minimum
+        progress_callback: Optional async callback(progress, node_name)
+
+    Returns:
+        Final state dict with all agent outputs
+
+    Security:
+        - Bounded by MAX_AGENT_ITERATIONS to prevent infinite loops
+        - Total timeout of AGENT_TIMEOUT * 3 for the full pipeline
     """
-    agent_type = request.agent_type
-    context = request.input_context
+    from app.agents.graph.workflows import (
+        build_builder_pipeline,
+        get_initial_state,
+    )
 
-    if agent_type == "research":
-        from app.agents.research_agent import run_research_agent
+    logger.info(f"Starting builder pipeline: job={job_id}, project={project_id}")
 
-        return await run_research_agent(
-            user_idea=context.get("user_idea", ""),
-            target_audience=context.get("target_audience", ""),
+    total_timeout = settings.AGENT_TIMEOUT * 3  # ~15 min for full pipeline
+
+    try:
+        graph = build_builder_pipeline(callback=progress_callback)
+        initial_state = get_initial_state(
+            project_id=project_id,
+            agent_type="builder",
+            input_context=input_context,
+            job_id=job_id,
         )
 
-    elif agent_type == "wireframe":
-        from app.agents.wireframe_agent import run_wireframe_agent
-
-        # Requirements can be passed as dict or string
-        requirements = context.get("requirements", "")
-        if isinstance(requirements, dict):
-            requirements = json.dumps(requirements, indent=2)
-        return await run_wireframe_agent(requirements=requirements)
-
-    elif agent_type == "code":
-        from app.agents.code_agent import run_code_agent
-
-        architecture = context.get("architecture", "")
-        if isinstance(architecture, dict):
-            architecture = json.dumps(architecture, indent=2)
-        return await run_code_agent(
-            architecture=architecture,
-            file_path=context.get("file_path", ""),
+        final_state = await asyncio.wait_for(
+            graph.ainvoke(initial_state),
+            timeout=total_timeout,
         )
 
-    elif agent_type == "qa":
-        from app.agents.qa_agent import run_qa_agent
+        # Persist all results to database
+        update_data = {"status": "in-progress"}
+        if final_state.get("requirements_spec"):
+            update_data["requirements_spec"] = final_state["requirements_spec"]
+        if final_state.get("architecture_spec"):
+            update_data["architecture_spec"] = final_state["architecture_spec"]
 
-        return await run_qa_agent(
-            code=context.get("code", ""),
-            file_path=context.get("file_path", ""),
-        )
+        await DatabaseOperations.update_project(project_id, update_data)
 
-    elif agent_type == "pedagogy":
-        from app.agents.pedagogy_agent import run_pedagogy_agent
+        logger.info(f"Builder pipeline completed: job={job_id}")
+        return {
+            "requirements_spec": final_state.get("requirements_spec"),
+            "architecture_spec": final_state.get("architecture_spec"),
+            "generated_code": final_state.get("generated_code"),
+            "qa_result": final_state.get("qa_result"),
+            "iterations": final_state.get("iteration_count", 0),
+        }
 
-        return await run_pedagogy_agent(
-            student_question=context.get("question", ""),
-            student_code=context.get("code", ""),
-        )
+    except asyncio.TimeoutError:
+        error_msg = f"Builder pipeline timeout ({total_timeout}s)"
+        logger.error(f"Timeout for job {job_id}: {error_msg}")
+        raise AgentExecutionError("builder", error_msg)
 
-    else:
-        raise ValueError(f"Unknown agent type: {agent_type}")
+    except AgentExecutionError:
+        raise
+
+    except Exception as e:
+        error_msg = f"Builder pipeline failed: {str(e)}"
+        logger.error(f"Error in job {job_id}: {error_msg}")
+        raise AgentExecutionError("builder", error_msg)

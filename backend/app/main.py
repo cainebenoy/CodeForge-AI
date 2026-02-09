@@ -3,6 +3,7 @@ CodeForge AI Backend - FastAPI Application Entry Point
 Handles app initialization, error handling, middleware setup, and event lifecycle
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
@@ -17,17 +18,65 @@ from app.core.logging import logger
 from app.middleware.rate_limiter import rate_limit_middleware
 from app.middleware.request_tracking import logging_middleware, request_id_middleware
 
+# ---------------------------------------------------------------------------
+# Background housekeeping task
+# ---------------------------------------------------------------------------
+
+_cleanup_task: asyncio.Task | None = None
+
+JOB_CLEANUP_INTERVAL_SECONDS = 3600  # 1 hour
+JOB_CLEANUP_MAX_AGE_HOURS = 24
+
+
+async def _periodic_job_cleanup() -> None:
+    """
+    Background coroutine that cleans up completed jobs older than
+    JOB_CLEANUP_MAX_AGE_HOURS every JOB_CLEANUP_INTERVAL_SECONDS.
+    Runs until cancelled on shutdown.
+    """
+    from app.services.job_queue import get_job_store
+
+    while True:
+        try:
+            await asyncio.sleep(JOB_CLEANUP_INTERVAL_SECONDS)
+            store = get_job_store()
+            removed = store.cleanup_old_jobs(hours=JOB_CLEANUP_MAX_AGE_HOURS)
+            if removed:
+                logger.info(f"Periodic cleanup removed {removed} old jobs")
+        except asyncio.CancelledError:
+            logger.info("Job cleanup task cancelled")
+            break
+        except Exception as e:
+            logger.error(f"Job cleanup error: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Lifespan
+# ---------------------------------------------------------------------------
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events with proper logging"""
+    """Application lifespan events with proper logging and background tasks"""
+    global _cleanup_task
+
     # Startup
     logger.info(f"Starting CodeForge AI Backend ({settings.ENVIRONMENT})")
     logger.info(f"Log level: {settings.LOG_LEVEL}")
 
+    # Launch periodic job cleanup
+    _cleanup_task = asyncio.create_task(_periodic_job_cleanup())
+
     yield
 
-    # Shutdown
+    # Shutdown — cancel background tasks gracefully
+    if _cleanup_task and not _cleanup_task.done():
+        _cleanup_task.cancel()
+        try:
+            await _cleanup_task
+        except asyncio.CancelledError:
+            pass
+
     logger.info("Shutting down CodeForge AI Backend")
 
 
@@ -71,8 +120,46 @@ app.include_router(api_router, prefix="/v1")
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint (skips logging)"""
-    return {"status": "healthy", "service": "codeforge-backend", "version": "0.1.0"}
+    """
+    Health check endpoint with dependency status.
+    Returns overall status + individual dependency checks (Supabase, Redis).
+    Always returns 200 so load balancers keep the instance in rotation —
+    degraded dependencies are reported in the response body.
+    """
+    deps: dict = {}
+    overall = "healthy"
+
+    # --- Supabase ---
+    try:
+        from app.services.supabase import supabase_client
+
+        # Lightweight query — RPC or table list to verify connectivity
+        supabase_client.table("projects").select("id").limit(1).execute()
+        deps["supabase"] = "ok"
+    except Exception as e:
+        deps["supabase"] = f"degraded: {type(e).__name__}"
+        overall = "degraded"
+
+    # --- Redis (optional) ---
+    try:
+        from app.services.job_queue import RedisJobStore, get_job_store
+
+        store = get_job_store()
+        if isinstance(store, RedisJobStore):
+            store._redis.ping()
+            deps["redis"] = "ok"
+        else:
+            deps["redis"] = "not configured (in-memory fallback)"
+    except Exception as e:
+        deps["redis"] = f"degraded: {type(e).__name__}"
+        overall = "degraded"
+
+    return {
+        "status": overall,
+        "service": "codeforge-backend",
+        "version": "0.1.0",
+        "dependencies": deps,
+    }
 
 
 # Error handlers

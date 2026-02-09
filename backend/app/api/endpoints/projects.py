@@ -8,10 +8,13 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 
 from app.core.auth import CurrentUser, get_current_user
+from app.core.exceptions import ExternalServiceError
+from app.core.exceptions import ValidationError as CFValidationError
 from app.core.logging import logger
 from app.schemas.protocol import (
     CodeFileCreate,
     CodeFileUpdate,
+    GitHubExportRequest,
     PaginatedResponse,
     ProjectCreate,
     ProjectUpdate,
@@ -321,3 +324,54 @@ async def delete_file(
     logger.info(f"Deleting file {file_path} from project {project_id}")
     await DatabaseOperations.delete_file(project_id, file_path)
     return {"message": "File deleted", "path": file_path}
+
+
+# ──────────────────────────────────────────────────────────────
+# GitHub Export
+# ──────────────────────────────────────────────────────────────
+
+
+@router.post("/{project_id}/export/github", response_model=dict)
+async def export_to_github(
+    body: GitHubExportRequest,
+    project_id: str = Depends(validate_project_id),
+    user: CurrentUser = Depends(get_current_user),
+) -> dict:
+    """
+    Export project files to a new GitHub repository.
+
+    Creates a repo under the user's GitHub account and pushes
+    all project files as an initial commit.
+
+    Body:
+    - repo_name: Desired repository name
+    - description: Optional repo description
+    - private: Whether the repo is private (default true)
+    - github_token: User's GitHub PAT (never stored)
+
+    Security:
+    - GitHub token passed per-request, never persisted
+    - Ownership check on project
+    - All file paths sanitised before upload
+    """
+    # Verify ownership
+    await DatabaseOperations.get_project(project_id, user_id=user.id)
+
+    logger.info(f"Exporting project {project_id} to GitHub repo '{body.repo_name}'")
+
+    try:
+        from app.services.github import export_project
+
+        result = await export_project(
+            token=body.github_token,
+            project_id=project_id,
+            repo_name=body.repo_name,
+            description=body.description,
+            private=body.private,
+        )
+        return result
+    except ValueError as e:
+        raise CFValidationError("export", str(e))
+    except Exception as e:
+        logger.error(f"GitHub export failed: {str(e)}")
+        raise ExternalServiceError("GitHub", str(e))

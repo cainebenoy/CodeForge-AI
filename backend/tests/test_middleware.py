@@ -62,12 +62,14 @@ class TestCheckRateLimit:
 
     @pytest.fixture(autouse=True)
     def _clear_store(self):
-        """Reset the in-memory rate limit store between tests."""
-        from app.middleware import rate_limiter
+        """Reset the global rate limiter between tests."""
+        from app.middleware import rate_limiter as rl_mod
+        from app.middleware.rate_limiter import InMemoryRateLimiter
 
-        rate_limiter._rate_limit_store.clear()
+        # Force a fresh in-memory limiter for each test
+        rl_mod._limiter = InMemoryRateLimiter()
         yield
-        rate_limiter._rate_limit_store.clear()
+        rl_mod._limiter = None
 
     @pytest.mark.asyncio
     async def test_first_request_allowed(self):
@@ -86,7 +88,7 @@ class TestCheckRateLimit:
 
     @pytest.mark.asyncio
     async def test_exceeding_limit(self):
-        from app.middleware.rate_limiter import _rate_limit_store, check_rate_limit
+        from app.middleware.rate_limiter import check_rate_limit, get_rate_limiter
 
         req = _make_request(client_host="9.9.9.9")
         # First call creates with full bucket (60 tokens) without decrement.
@@ -100,7 +102,7 @@ class TestCheckRateLimit:
 
     @pytest.mark.asyncio
     async def test_tokens_refill_over_time(self):
-        from app.middleware.rate_limiter import _rate_limit_store, check_rate_limit
+        from app.middleware.rate_limiter import check_rate_limit, get_rate_limiter
 
         req = _make_request(client_host="11.11.11.11")
         # Exhaust tokens (61 calls to fully drain)
@@ -109,8 +111,9 @@ class TestCheckRateLimit:
         assert await check_rate_limit(req) is False
 
         # Simulate time passing (2 seconds → refills ~2 tokens)
+        limiter = get_rate_limiter()
         key = "ip:11.11.11.11"
-        _rate_limit_store[key]["last_update"] -= 2
+        limiter._store[key]["last_update"] -= 2
         assert await check_rate_limit(req) is True
 
 
@@ -119,11 +122,12 @@ class TestRateLimitMiddleware:
 
     @pytest.fixture(autouse=True)
     def _clear_store(self):
-        from app.middleware import rate_limiter
+        from app.middleware import rate_limiter as rl_mod
+        from app.middleware.rate_limiter import InMemoryRateLimiter
 
-        rate_limiter._rate_limit_store.clear()
+        rl_mod._limiter = InMemoryRateLimiter()
         yield
-        rate_limiter._rate_limit_store.clear()
+        rl_mod._limiter = None
 
     @pytest.mark.asyncio
     async def test_health_check_skips_rate_limit(self):

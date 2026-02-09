@@ -1,9 +1,13 @@
 """
 Database operations layer
-Handles all Supabase operations with proper error handling
+Handles all Supabase operations with proper error handling.
+
+All synchronous supabase-py calls are wrapped with ``asyncio.to_thread``
+so they never block the FastAPI event loop.
 """
 
-from typing import Any, Dict, List, Optional
+import asyncio
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from app.core.exceptions import (
     ExternalServiceError,
@@ -13,6 +17,16 @@ from app.core.exceptions import (
 )
 from app.core.logging import logger
 from app.services.supabase import supabase_client
+
+T = TypeVar("T")
+
+
+async def _db_execute(fn: Callable[[], T]) -> T:
+    """
+    Run a **synchronous** supabase-py call in a background thread so the
+    event loop is never blocked.  Every database method below uses this.
+    """
+    return await asyncio.to_thread(fn)
 
 
 class DatabaseOperations:
@@ -28,12 +42,14 @@ class DatabaseOperations:
         Raises: ResourceNotFoundError if not found, PermissionError if not owner.
         """
         try:
-            response = (
-                supabase_client.table("projects")
-                .select("*")
-                .eq("id", project_id)
-                .single()
-                .execute()
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("projects")
+                    .select("*")
+                    .eq("id", project_id)
+                    .single()
+                    .execute()
+                )
             )
 
             if not response.data:
@@ -70,19 +86,21 @@ class DatabaseOperations:
             raise ValidationError("mode", "Mode must be 'builder' or 'student'")
 
         try:
-            response = (
-                supabase_client.table("projects")
-                .insert(
-                    {
-                        "user_id": user_id,
-                        "title": title,
-                        "description": description,
-                        "mode": mode,
-                        "tech_stack": tech_stack,
-                        "status": "planning",
-                    }
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("projects")
+                    .insert(
+                        {
+                            "user_id": user_id,
+                            "title": title,
+                            "description": description,
+                            "mode": mode,
+                            "tech_stack": tech_stack,
+                            "status": "planning",
+                        }
+                    )
+                    .execute()
                 )
-                .execute()
             )
 
             if response.data:
@@ -122,11 +140,13 @@ class DatabaseOperations:
             raise ValidationError("data", "No valid fields to update")
 
         try:
-            response = (
-                supabase_client.table("projects")
-                .update(filtered_data)
-                .eq("id", project_id)
-                .execute()
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("projects")
+                    .update(filtered_data)
+                    .eq("id", project_id)
+                    .execute()
+                )
             )
 
             if response.data:
@@ -151,17 +171,19 @@ class DatabaseOperations:
 
         try:
             # Try to update first (upsert pattern)
-            response = (
-                supabase_client.table("project_files")
-                .upsert(
-                    {
-                        "project_id": project_id,
-                        "path": path,
-                        "content": content,
-                        "language": language,
-                    }
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("project_files")
+                    .upsert(
+                        {
+                            "project_id": project_id,
+                            "path": path,
+                            "content": content,
+                            "language": language,
+                        }
+                    )
+                    .execute()
                 )
-                .execute()
             )
 
             if response.data:
@@ -180,12 +202,14 @@ class DatabaseOperations:
         Returns: List of file records
         """
         try:
-            response = (
-                supabase_client.table("project_files")
-                .select("*")
-                .eq("project_id", project_id)
-                .order("path", desc=False)
-                .execute()
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("project_files")
+                    .select("*")
+                    .eq("project_id", project_id)
+                    .order("path", desc=False)
+                    .execute()
+                )
             )
 
             logger.info(
@@ -211,11 +235,13 @@ class DatabaseOperations:
         await DatabaseOperations.get_project(project_id, user_id=user_id)
 
         try:
-            response = (
-                supabase_client.table("projects")
-                .update({"status": "archived"})
-                .eq("id", project_id)
-                .execute()
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("projects")
+                    .update({"status": "archived"})
+                    .eq("id", project_id)
+                    .execute()
+                )
             )
 
             if response.data:
@@ -246,27 +272,31 @@ class DatabaseOperations:
         offset = (page - 1) * page_size
 
         try:
-            query = (
-                supabase_client.table("projects")
-                .select("*", count="exact")
-                .eq("user_id", user_id)
-            )
 
-            # Filter by mode if specified
-            if mode:
-                query = query.eq("mode", mode)
+            def _query():
+                query = (
+                    supabase_client.table("projects")
+                    .select("*", count="exact")
+                    .eq("user_id", user_id)
+                )
 
-            # Filter by status; default excludes archived
-            if status:
-                query = query.eq("status", status)
-            else:
-                query = query.neq("status", "archived")
+                # Filter by mode if specified
+                if mode:
+                    query = query.eq("mode", mode)
 
-            response = (
-                query.order("created_at", desc=True)
-                .range(offset, offset + page_size - 1)
-                .execute()
-            )
+                # Filter by status; default excludes archived
+                if status:
+                    query = query.eq("status", status)
+                else:
+                    query = query.neq("status", "archived")
+
+                return (
+                    query.order("created_at", desc=True)
+                    .range(offset, offset + page_size - 1)
+                    .execute()
+                )
+
+            response = await _db_execute(_query)
 
             total = response.count if response.count is not None else 0
             items = response.data or []
@@ -293,13 +323,15 @@ class DatabaseOperations:
         Raises ResourceNotFoundError if not found.
         """
         try:
-            response = (
-                supabase_client.table("project_files")
-                .select("*")
-                .eq("project_id", project_id)
-                .eq("path", file_path)
-                .single()
-                .execute()
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("project_files")
+                    .select("*")
+                    .eq("project_id", project_id)
+                    .eq("path", file_path)
+                    .single()
+                    .execute()
+                )
             )
 
             if not response.data:
@@ -326,12 +358,14 @@ class DatabaseOperations:
             if language:
                 update_data["language"] = language
 
-            response = (
-                supabase_client.table("project_files")
-                .update(update_data)
-                .eq("project_id", project_id)
-                .eq("path", file_path)
-                .execute()
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("project_files")
+                    .update(update_data)
+                    .eq("project_id", project_id)
+                    .eq("path", file_path)
+                    .execute()
+                )
             )
 
             if response.data:
@@ -356,9 +390,15 @@ class DatabaseOperations:
             # Verify file exists first
             await DatabaseOperations.get_file(project_id, file_path)
 
-            supabase_client.table("project_files").delete().eq(
-                "project_id", project_id
-            ).eq("path", file_path).execute()
+            await _db_execute(
+                lambda: (
+                    supabase_client.table("project_files")
+                    .delete()
+                    .eq("project_id", project_id)
+                    .eq("path", file_path)
+                    .execute()
+                )
+            )
 
             logger.info(f"Deleted file: {file_path} (project {project_id})")
             return True
@@ -366,4 +406,171 @@ class DatabaseOperations:
             raise
         except Exception as e:
             logger.error(f"Error deleting file {file_path}: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    # ──────────────────────────────────────────────────────────
+    # Learning Roadmap operations (Student Mode)
+    # ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def create_roadmap(
+        project_id: str,
+        modules: list,
+        skill_level: str = "beginner",
+    ) -> Dict[str, Any]:
+        """
+        Create a learning roadmap for a project.
+        Replaces any existing roadmap for the project (one roadmap per project).
+        """
+        try:
+            # Delete existing roadmap for this project first
+            await _db_execute(
+                lambda: (
+                    supabase_client.table("learning_roadmaps")
+                    .delete()
+                    .eq("project_id", project_id)
+                    .execute()
+                )
+            )
+
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("learning_roadmaps")
+                    .insert(
+                        {
+                            "project_id": project_id,
+                            "modules": modules,
+                            "current_step_index": 0,
+                        }
+                    )
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Created roadmap for project: {project_id}")
+                return response.data[0]
+            else:
+                raise ExternalServiceError("Supabase", "Failed to create roadmap")
+        except Exception as e:
+            logger.error(f"Error creating roadmap: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def get_roadmap(project_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get the learning roadmap for a project.
+        Returns None if no roadmap exists.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("learning_roadmaps")
+                    .select("*")
+                    .eq("project_id", project_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Retrieved roadmap for project: {project_id}")
+                return response.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"Error fetching roadmap: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def update_roadmap_progress(
+        roadmap_id: str, step_index: int
+    ) -> Dict[str, Any]:
+        """
+        Update the current step index of a roadmap.
+        Raises ResourceNotFoundError if roadmap doesn't exist.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("learning_roadmaps")
+                    .update({"current_step_index": step_index})
+                    .eq("id", roadmap_id)
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Updated roadmap {roadmap_id}: step_index={step_index}")
+                return response.data[0]
+            else:
+                raise ResourceNotFoundError("Roadmap", roadmap_id)
+        except ResourceNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating roadmap progress: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    # ──────────────────────────────────────────────────────────
+    # Daily Session operations (Student Mode)
+    # ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def create_session(
+        project_id: str,
+        transcript: list,
+        concepts_covered: list,
+        duration_minutes: int = 0,
+    ) -> Dict[str, Any]:
+        """
+        Record a daily learning session.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("daily_sessions")
+                    .insert(
+                        {
+                            "project_id": project_id,
+                            "transcript": transcript,
+                            "concepts_covered": concepts_covered,
+                        }
+                    )
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Created session for project: {project_id}")
+                return response.data[0]
+            else:
+                raise ExternalServiceError("Supabase", "Failed to create session")
+        except Exception as e:
+            logger.error(f"Error creating session: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def list_sessions(project_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        List daily sessions for a project, ordered by most recent first.
+        """
+        limit = min(limit, 100)  # Cap at 100
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("daily_sessions")
+                    .select("*")
+                    .eq("project_id", project_id)
+                    .order("created_at", desc=True)
+                    .limit(limit)
+                    .execute()
+                )
+            )
+
+            logger.info(
+                f"Retrieved {len(response.data or [])} sessions for project: {project_id}"
+            )
+            return response.data or []
+        except Exception as e:
+            logger.error(f"Error listing sessions: {str(e)}")
             raise ExternalServiceError("Supabase", str(e))

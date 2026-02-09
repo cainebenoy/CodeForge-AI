@@ -1,14 +1,18 @@
 """
 Agent API endpoints
-Handles agent job management: triggering, polling, and completion
+Handles agent job management: triggering, polling, streaming, and completion
 """
 
+import asyncio
+import json
 from typing import Optional
 from uuid import uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi.responses import StreamingResponse
 
 from app.core.auth import CurrentUser, get_current_user
+from app.core.config import settings
 from app.core.exceptions import ResourceNotFoundError, ValidationError
 from app.core.logging import logger
 from app.schemas.protocol import (
@@ -224,3 +228,131 @@ async def execute_agent_background(job_id: str, request: AgentRequest):
     except Exception as e:
         logger.error(f"Agent job failed: {job_id} - {str(e)}")
         job_store.update_job(job_id, error=str(e), progress=0)
+
+
+# ──────────────────────────────────────────────────────────────
+# SSE Streaming — real-time job progress
+# ──────────────────────────────────────────────────────────────
+
+
+@router.get("/jobs/{job_id}/stream")
+async def stream_job_progress(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Stream agent job progress as Server-Sent Events (SSE).
+
+    The endpoint polls the job store every second and emits SSE events
+    with progress updates. Closes automatically when the job completes,
+    fails, or the stream timeout is reached.
+
+    Event format:
+        event: progress
+        data: {"job_id": "...", "status": "running", "progress": 40.0}
+
+        event: complete
+        data: {"job_id": "...", "status": "completed", "progress": 100.0, "result": {...}}
+
+        event: error
+        data: {"job_id": "...", "status": "failed", "error": "..."}
+
+    Security:
+    - Auth required
+    - Job existence validated
+    - Stream timeout prevents resource exhaustion
+    """
+    InputValidator.validate_uuid(job_id)
+
+    # Verify the job exists before starting the stream
+    job = job_store.get_job(job_id)
+    if not job:
+        raise ResourceNotFoundError("Job", job_id)
+
+    # Stream timeout: agent timeout + 60s buffer
+    stream_timeout = settings.AGENT_TIMEOUT + 60
+
+    async def _event_generator():
+        """Generate SSE events by polling job status."""
+        elapsed = 0.0
+        poll_interval = 1.0  # seconds
+        last_progress = -1.0
+
+        while elapsed < stream_timeout:
+            current_job = job_store.get_job(job_id)
+            if current_job is None:
+                # Job was cleaned up
+                yield _sse_event(
+                    "error",
+                    {
+                        "job_id": job_id,
+                        "status": "failed",
+                        "error": "Job no longer exists",
+                    },
+                )
+                return
+
+            progress = current_job.progress
+
+            if current_job.status == JobStatusType.COMPLETED:
+                yield _sse_event(
+                    "complete",
+                    {
+                        "job_id": job_id,
+                        "status": "completed",
+                        "progress": 100.0,
+                        "result": current_job.result,
+                    },
+                )
+                return
+
+            if current_job.status == JobStatusType.FAILED:
+                yield _sse_event(
+                    "error",
+                    {
+                        "job_id": job_id,
+                        "status": "failed",
+                        "error": current_job.error or "Unknown error",
+                    },
+                )
+                return
+
+            # Only emit if progress changed (avoid duplicate events)
+            if progress != last_progress:
+                yield _sse_event(
+                    "progress",
+                    {
+                        "job_id": job_id,
+                        "status": current_job.status.value,
+                        "progress": progress,
+                    },
+                )
+                last_progress = progress
+
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+
+        # Timeout reached
+        yield _sse_event(
+            "error",
+            {
+                "job_id": job_id,
+                "status": "timeout",
+                "error": f"Stream timeout after {stream_timeout}s",
+            },
+        )
+
+    return StreamingResponse(
+        _event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        },
+    )
+
+
+def _sse_event(event_type: str, data: dict) -> str:
+    """Format a Server-Sent Event string."""
+    return f"event: {event_type}\ndata: {json.dumps(data)}\n\n"

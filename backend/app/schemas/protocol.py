@@ -419,3 +419,127 @@ class PaginatedResponse(BaseModel):
     page: int = Field(..., ge=1, description="Current page number")
     page_size: int = Field(..., ge=1, le=50, description="Items per page (max 50)")
     has_more: bool = Field(..., description="Whether more pages exist")
+
+
+# --- Student Mode / Learning Roadmap schemas ---
+
+
+class LearningModule(BaseModel):
+    """A single module in a learning roadmap"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(..., min_length=3, max_length=200)
+    description: str = Field(..., min_length=5, max_length=1000)
+    concepts: List[str] = Field(..., min_length=1, max_length=20)
+    exercises: List[str] = Field(default_factory=list, max_length=10)
+    estimated_hours: float = Field(..., ge=0.5, le=40.0)
+
+
+class LearningRoadmap(BaseModel):
+    """
+    Learning roadmap output schema (used by Roadmap Agent)
+    Structured curriculum generated from project requirements + student skill level
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    modules: List[LearningModule] = Field(
+        ..., min_length=1, max_length=20, description="Ordered learning modules"
+    )
+    total_estimated_hours: float = Field(
+        ..., ge=1.0, le=500.0, description="Total estimated hours"
+    )
+    prerequisites: List[str] = Field(
+        default_factory=list, max_length=10, description="Prerequisite knowledge"
+    )
+    learning_objectives: List[str] = Field(
+        ..., min_length=1, max_length=10, description="High-level learning goals"
+    )
+
+
+class RoadmapCreate(BaseModel):
+    """Request to create/generate a learning roadmap"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    skill_level: Literal["beginner", "intermediate", "advanced"] = Field(
+        ..., description="Student's current skill level"
+    )
+    focus_areas: Optional[List[str]] = Field(
+        None, max_length=5, description="Specific topics to focus on"
+    )
+
+
+class RoadmapProgressUpdate(BaseModel):
+    """Request to update roadmap progress"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_index: int = Field(..., ge=0, description="New current step index")
+
+
+class SessionCreate(BaseModel):
+    """Request to create a daily learning session"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    transcript: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        max_length=100,
+        description="Session conversation transcript",
+    )
+    concepts_covered: List[str] = Field(
+        default_factory=list,
+        max_length=20,
+        description="Concepts covered in this session",
+    )
+    duration_minutes: int = Field(
+        default=0, ge=0, le=480, description="Session duration in minutes"
+    )
+
+
+class GitHubExportRequest(BaseModel):
+    """Request to export project to GitHub"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    repo_name: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        pattern="^[a-zA-Z0-9][a-zA-Z0-9._-]*$",
+        description="GitHub repository name",
+    )
+    description: str = Field(
+        default="",
+        max_length=350,
+        description="Repository description",
+    )
+    private: bool = Field(
+        default=True,
+        description="Whether the repository should be private",
+    )
+    github_token: str = Field(
+        ...,
+        min_length=1,
+        max_length=500,
+        description="GitHub personal access token (never stored)",
+    )
+
+
+class StudentProgress(BaseModel):
+    """Computed student progress summary"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    roadmap_id: str = Field(..., description="UUID of the roadmap")
+    project_id: str = Field(..., description="UUID of the project")
+    completed_modules: int = Field(..., ge=0)
+    total_modules: int = Field(..., ge=0)
+    current_module: Optional[str] = Field(
+        None, description="Title of the current module"
+    )
+    percent_complete: float = Field(..., ge=0.0, le=100.0)
+    total_sessions: int = Field(..., ge=0)
+    total_time_minutes: int = Field(..., ge=0)
