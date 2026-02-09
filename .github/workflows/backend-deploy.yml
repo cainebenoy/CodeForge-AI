@@ -1,0 +1,60 @@
+name: Deploy Backend (FastAPI)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'backend/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: poetry install
+      
+      - name: Lint with ruff
+        working-directory: ./backend
+        run: poetry run ruff check .
+      
+      - name: Type check with mypy
+        working-directory: ./backend
+        run: poetry run mypy .
+      
+      - name: Run tests
+        working-directory: ./backend
+        run: poetry run pytest
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+  
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Deploy to Railway
+        run: |
+          # Railway deployment will be configured separately
+          echo "Deploy to Railway/Render"
