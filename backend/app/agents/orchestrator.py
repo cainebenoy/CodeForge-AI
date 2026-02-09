@@ -1,75 +1,288 @@
 """
 Agent Orchestrator - coordinates agent workflows
+Routes requests to appropriate agents with error handling and timeout management
 """
-from typing import Dict, Any
+import asyncio
+from typing import Dict, Any, Optional
 from datetime import datetime
 
-from app.schemas.protocol import AgentRequest, JobStatus
-from app.agents.research_agent import run_research_agent
-from app.agents.wireframe_agent import run_wireframe_agent
-from app.agents.code_agent import run_code_agent
-from app.services.supabase import supabase_client
+from app.schemas.protocol import AgentRequest
+from app.core.config import settings
+from app.core.logging import logger
+from app.core.exceptions import AgentExecutionError
+from app.services.database import DatabaseOperations
+from app.services.llm_orchestrator import LLMOrchestrator
 
 
 async def run_agent_workflow(
     job_id: str,
     request: AgentRequest,
-    job_store: Dict[str, JobStatus],
-) -> None:
+) -> Optional[Dict[str, Any]]:
     """
-    Execute agent workflow asynchronously
-    Updates job status and stores results in Supabase
-    
-    Security: All inputs validated via Pydantic
-    Timeout: Max 5 minutes per agent
+    Execute agent workflow asynchronously with proper error handling and timeouts
+
+    Args:
+        job_id: Unique job identifier
+        request: Agent request with type and context
+
+    Returns:
+        Agent result dictionary (schema depends on agent type)
+
+    Security:
+        - All inputs validated via Pydantic schema
+        - Timeouts prevent resource exhaustion (5 min max)
+        - Error messages sanitized (no stack traces to client)
+        - Database operations use RLS
+
+    Timeouts:
+        - Research Agent: 180s
+        - Wireframe Agent: 240s
+        - Code Agent: 300s
+        - QA Agent: 120s
+        - Pedagogy Agent: 120s
     """
+    logger.info(f"Starting agent workflow: job={job_id}, type={request.agent_type}")
+
     try:
-        # Update status to running
-        job_store[job_id].status = "running"
-        
-        # Route to appropriate agent
+        # Initialize LLM orchestrator
+        llm = LLMOrchestrator()
+
+        # Route to appropriate agent with timeout
         if request.agent_type == "research":
-            user_idea = request.input_context.get("user_idea", "")
-            result = await run_research_agent(user_idea)
-            
-            # Store in Supabase
-            await supabase_client.table("projects").update({
-                "requirements_spec": result.model_dump(),
-                "status": "requirements_complete",
-            }).eq("id", request.project_id).execute()
-        
+            result = await asyncio.wait_for(
+                _run_research_agent(llm, request),
+                timeout=180,
+            )
         elif request.agent_type == "wireframe":
-            requirements = request.input_context.get("requirements", "")
-            result = await run_wireframe_agent(requirements)
-            
-            await supabase_client.table("projects").update({
-                "architecture_spec": result.model_dump(),
-                "status": "architecture_complete",
-            }).eq("id", request.project_id).execute()
-        
+            result = await asyncio.wait_for(
+                _run_wireframe_agent(llm, request),
+                timeout=240,
+            )
         elif request.agent_type == "code":
-            architecture = request.input_context.get("architecture", "")
-            file_path = request.input_context.get("file_path", "")
-            result = await run_code_agent(architecture, file_path)
-            
-            # Store file in project_files table
-            await supabase_client.table("project_files").insert({
-                "project_id": request.project_id,
-                "path": file_path,
-                "content": result,
-                "language": "typescript",
-            }).execute()
-        
-        # Mark job as completed
-        job_store[job_id].status = "completed"
-        job_store[job_id].result = {"success": True}
-        job_store[job_id].completed_at = datetime.utcnow()
-    
+            result = await asyncio.wait_for(
+                _run_code_agent(llm, request),
+                timeout=300,
+            )
+        elif request.agent_type == "qa":
+            result = await asyncio.wait_for(
+                _run_qa_agent(llm, request),
+                timeout=120,
+            )
+        elif request.agent_type == "pedagogy":
+            result = await asyncio.wait_for(
+                _run_pedagogy_agent(llm, request),
+                timeout=120,
+            )
+        else:
+            raise ValueError(f"Unknown agent type: {request.agent_type}")
+
+        # Store result in database
+        await DatabaseOperations.update_project(
+            request.project_id,
+            {
+                "status": f"{request.agent_type}_complete",
+                f"{request.agent_type}_result": result,
+            },
+        )
+
+        logger.info(f"Agent workflow completed: job={job_id}")
+        return result
+
+    except asyncio.TimeoutError:
+        error_msg = f"Agent execution timeout ({settings.AGENT_TIMEOUT}s)"
+        logger.error(f"Timeout for job {job_id}: {error_msg}")
+        raise AgentExecutionError(request.agent_type, error_msg)
+
     except Exception as e:
-        # Error handling - log but don't expose internals
-        job_store[job_id].status = "failed"
-        job_store[job_id].error = "Agent execution failed"
-        job_store[job_id].completed_at = datetime.utcnow()
-        
-        # Log error server-side (structured logging)
-        print(f"Agent error: {str(e)}")
+        error_msg = f"Agent execution failed: {str(e)}"
+        logger.error(f"Error in job {job_id}: {error_msg}")
+        raise AgentExecutionError(request.agent_type, error_msg)
+
+
+async def _run_research_agent(llm: LLMOrchestrator, request: AgentRequest) -> Dict[str, Any]:
+    """
+    Research Agent: Analyze idea and generate requirements
+    Output: RequirementsDoc schema
+    """
+    logger.info(f"Running Research Agent for project {request.project_id}")
+
+    user_idea = request.input_context.get("user_idea", "")
+    target_audience = request.input_context.get("target_audience", "")
+
+    prompt = f"""Analyze this app idea and generate a requirements specification.
+
+App Idea: {user_idea}
+Target Audience: {target_audience}
+
+Generate a JSON response matching this structure:
+{{
+  "app_name": "string",
+  "elevator_pitch": "string (20-500 chars)",
+  "target_audience": [
+    {{"role": "user role", "goal": "what they want to achieve", "pain_point": "their problem"}}
+  ],
+  "core_features": [
+    {{"name": "feature name", "description": "what it does", "priority": "must-have|should-have|nice-to-have"}}
+  ],
+  "recommended_stack": ["technology1", "technology2"],
+  "technical_constraints": "optional notes"
+}}"""
+
+    response = await llm.call_agent_llm(
+        agent_type="research",
+        user_input=prompt,
+        context={"user_idea": user_idea},
+        temperature=0.7,
+    )
+
+    # Parse response as JSON
+    import json
+    try:
+        result = json.loads(response)
+    except json.JSONDecodeError:
+        logger.warning(f"Invalid JSON response from Research Agent, using raw response")
+        result = {"raw_response": response}
+
+    return result
+
+
+async def _run_wireframe_agent(llm: LLMOrchestrator, request: AgentRequest) -> Dict[str, Any]:
+    """
+    Wireframe Agent: Design architecture and component structure
+    Output: WireframeSpec schema
+    """
+    logger.info(f"Running Wireframe Agent for project {request.project_id}")
+
+    requirements = request.input_context.get("requirements", "")
+
+    prompt = f"""Design the architecture for this app based on requirements.
+
+Requirements: {requirements}
+
+Generate a JSON response with:
+{{
+  "site_map": [
+    {{
+      "path": "/route",
+      "description": "page description",
+      "components": [
+        {{"name": "ComponentName", "props": ["props"], "children": ["child components"]}}
+      ]
+    }}
+  ],
+  "global_state_needs": ["state entities"],
+  "theme_colors": ["#hexcolor1", "#hexcolor2"]
+}}"""
+
+    response = await llm.call_agent_llm(
+        agent_type="wireframe",
+        user_input=prompt,
+        context={"requirements": requirements},
+        temperature=0.5,
+    )
+
+    import json
+    try:
+        result = json.loads(response)
+    except json.JSONDecodeError:
+        logger.warning(f"Invalid JSON response from Wireframe Agent")
+        result = {"raw_response": response}
+
+    return result
+
+
+async def _run_code_agent(llm: LLMOrchestrator, request: AgentRequest) -> Dict[str, Any]:
+    """
+    Code Agent: Generate production-ready code
+    Uses Gemini 1.5 Pro for large context window awareness
+    """
+    logger.info(f"Running Code Agent for project {request.project_id}")
+
+    architecture = request.input_context.get("architecture", "")
+    component_specs = request.input_context.get("components", [])
+
+    prompt = f"""Generate production-ready TypeScript/React code.
+
+Architecture: {architecture}
+Components to generate: {component_specs}
+
+Generate code that is:
+- Type-safe with strict TypeScript
+- Follows React best practices
+- Includes error handling
+- Has JSDoc comments
+- Uses semantic HTML
+- Follows accessibility standards"""
+
+    response = await llm.call_agent_llm(
+        agent_type="code",
+        user_input=prompt,
+        context={"architecture": architecture},
+        temperature=0.3,
+    )
+
+    return {"generated_code": response}
+
+
+async def _run_qa_agent(llm: LLMOrchestrator, request: AgentRequest) -> Dict[str, Any]:
+    """
+    QA Agent: Review code for quality and security
+    Output: List of issues with severity levels
+    """
+    logger.info(f"Running QA Agent for project {request.project_id}")
+
+    code = request.input_context.get("code", "")
+
+    prompt = f"""Review this code for production readiness.
+
+Code:
+{code}
+
+Check for:
+- Type safety violations
+- Security vulnerabilities
+- Performance issues
+- Error handling coverage
+- Accessibility issues
+
+Report each issue with severity: CRITICAL, HIGH, MEDIUM, LOW"""
+
+    response = await llm.call_agent_llm(
+        agent_type="qa",
+        user_input=prompt,
+        context={"code_length": len(code)},
+        temperature=0.5,
+    )
+
+    return {"review_report": response}
+
+
+async def _run_pedagogy_agent(llm: LLMOrchestrator, request: AgentRequest) -> Dict[str, Any]:
+    """
+    Pedagogy Agent: Guide student learning with Socratic method
+    Output: Guided learning steps and questions
+    """
+    logger.info(f"Running Pedagogy Agent for project {request.project_id}")
+
+    student_question = request.input_context.get("question", "")
+    topic = request.input_context.get("topic", "")
+
+    prompt = f"""Help a student learn about {topic} using the Socratic method.
+
+Student's Question: {student_question}
+
+Respond by:
+1. Asking clarifying questions (don't give answers directly)
+2. Guiding them to think through the problem
+3. Explaining the WHY behind concepts
+4. Providing hints, not solutions
+5. Encouraging experimentation"""
+
+    response = await llm.call_agent_llm(
+        agent_type="pedagogy",
+        user_input=prompt,
+        context={"topic": topic},
+        temperature=0.8,
+    )
+
+    return {"guidance": response}
