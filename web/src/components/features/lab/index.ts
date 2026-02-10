@@ -1,0 +1,5 @@
+export { LabHeader } from './LabHeader'
+export { InstructionPanel } from './InstructionPanel'
+export { CodeEditor } from './CodeEditor'
+export { MentorChat } from './MentorChat'
+export { LabFooter } from './LabFooter'

@@ -57,6 +57,8 @@ const config: Config = {
           code: 'hsl(var(--agent-code))',
           pedagogy: 'hsl(var(--agent-pedagogy))',
         },
+        // Landing page accent (dark-mode emerald CTA glow)
+        'cf-primary': '#13ec6d',
       },
       borderRadius: {
         lg: 'var(--radius)',
@@ -66,6 +68,12 @@ const config: Config = {
       fontFamily: {
         sans: ['var(--font-inter)'],
         mono: ['var(--font-jetbrains-mono)'],
+      },
+      backgroundImage: {
+        'grid-light':
+          'linear-gradient(to right, #f3f4f6 1px, transparent 1px), linear-gradient(to bottom, #f3f4f6 1px, transparent 1px)',
+        'grid-dark':
+          'linear-gradient(to right, #27272a 1px, transparent 1px), linear-gradient(to bottom, #27272a 1px, transparent 1px)',
       },
       keyframes: {
         'accordion-down': {
