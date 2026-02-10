@@ -423,3 +423,60 @@ async def test_builder_pipeline_progress_callbacks():
         # Verify progress values increased
         progress_values = [call.args[0] for call in callback.call_args_list]
         assert progress_values == [20.0, 40.0, 60.0, 80.0]
+
+
+# ──────────────────────────────────────────────────────────────
+# Roadmap agent type in SINGLE_AGENT_RESULT_KEYS
+# ──────────────────────────────────────────────────────────────
+
+
+def test_roadmap_agent_in_single_agent_result_keys():
+    """Roadmap agent type should be registered in SINGLE_AGENT_RESULT_KEYS"""
+    assert "roadmap" in SINGLE_AGENT_RESULT_KEYS
+
+
+# ──────────────────────────────────────────────────────────────
+# RAG pattern storage on QA pass
+# ──────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_store_successful_pattern_called_on_qa_pass():
+    """_store_successful_pattern should be called when QA passes"""
+    with (
+        patch(
+            "app.agents.research_agent.run_research_agent",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_REQUIREMENTS,
+        ),
+        patch(
+            "app.agents.wireframe_agent.run_wireframe_agent",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_WIREFRAME,
+        ),
+        patch(
+            "app.agents.code_agent.run_code_agent",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_CODE,
+        ),
+        patch(
+            "app.agents.qa_agent.run_qa_agent",
+            new_callable=AsyncMock,
+            return_value=SAMPLE_QA_PASS,
+        ),
+        patch(
+            "app.agents.graph.nodes._store_successful_pattern",
+            new_callable=AsyncMock,
+        ) as mock_store,
+    ):
+        graph = build_builder_pipeline()
+        initial = get_initial_state(
+            project_id="proj-1",
+            agent_type="builder",
+            input_context={"user_idea": "todo app"},
+        )
+
+        result = await graph.ainvoke(initial)
+
+        # QA passed → _store_successful_pattern should have been called
+        mock_store.assert_awaited_once()

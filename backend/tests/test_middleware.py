@@ -42,9 +42,18 @@ class TestGetRateLimitKey:
         assert key == "ip:10.0.0.1"
 
     def test_key_from_user_id(self):
+        """Rate limiter should extract user ID from JWT (not X-User-ID header)."""
+        import jwt as pyjwt
+
         from app.middleware.rate_limiter import get_rate_limit_key
 
-        req = _make_request(user_id="user-123")
+        token = pyjwt.encode(
+            {"sub": "user-123", "aud": "authenticated", "exp": 99999999999},
+            "test-jwt-secret-super-secret-at-least-32-chars-long",
+            algorithm="HS256",
+        )
+        req = _make_request()
+        req.headers = {"Authorization": f"Bearer {token}"}
         key = get_rate_limit_key(req)
         assert key == "user:user-123"
 
@@ -224,3 +233,123 @@ class TestLoggingMiddleware:
 
         with pytest.raises(RuntimeError, match="boom"):
             await logging_middleware(req, call_next)
+
+
+# ---------------------------------------------------------------------------
+# JWT-based rate limit key extraction
+# ---------------------------------------------------------------------------
+
+
+class TestJWTRateLimitKey:
+    """Tests for JWT-based rate limit key generation."""
+
+    def test_key_from_jwt_bearer(self):
+        """Rate limiter should extract user ID from a valid JWT token."""
+        import jwt as pyjwt
+
+        from app.middleware.rate_limiter import get_rate_limit_key
+
+        token = pyjwt.encode(
+            {"sub": "test-user-id", "aud": "authenticated", "exp": 99999999999},
+            "test-jwt-secret-super-secret-at-least-32-chars-long",
+            algorithm="HS256",
+        )
+        request = _make_request()
+        request.headers = {"Authorization": f"Bearer {token}"}
+
+        key = get_rate_limit_key(request)
+        assert key == "user:test-user-id"
+
+    def test_key_falls_back_to_ip_on_invalid_jwt(self):
+        """Rate limiter should fall back to IP when JWT is invalid."""
+        from app.middleware.rate_limiter import get_rate_limit_key
+
+        request = _make_request(client_host="10.0.0.42")
+        request.headers = {"Authorization": "Bearer this-is-not-a-valid-jwt"}
+
+        key = get_rate_limit_key(request)
+        assert key == "ip:10.0.0.42"
+
+
+# ---------------------------------------------------------------------------
+# CSRF middleware tests
+# ---------------------------------------------------------------------------
+
+
+class TestCSRFMiddleware:
+    """Tests for CSRF middleware using the FastAPI TestClient."""
+
+    def test_get_request_passes_without_csrf(self, client):
+        """GET requests should pass without any CSRF tokens."""
+        response = client.get("/health")
+        assert response.status_code == 200
+
+    def test_post_without_cookie_passes(self, client):
+        """POST without a csrf cookie should pass (first request scenario)."""
+        response = client.post(
+            "/v1/agents/run-agent",
+            json={
+                "project_id": "550e8400-e29b-41d4-a716-446655440000",
+                "agent_type": "research",
+                "input_context": {"user_idea": "test"},
+            },
+        )
+        # Should not be 403 from CSRF — will be 401 from auth instead
+        assert response.status_code != 403
+
+    def test_post_with_cookie_but_no_header_fails(self, client):
+        """POST with csrf cookie but missing header should be rejected."""
+        client.cookies.set("csrf_token", "test-csrf-token-value")
+        response = client.post(
+            "/v1/agents/run-agent",
+            json={
+                "project_id": "550e8400-e29b-41d4-a716-446655440000",
+                "agent_type": "research",
+                "input_context": {"user_idea": "test"},
+            },
+        )
+        assert response.status_code == 403
+
+    def test_post_with_matching_tokens_passes(self, client):
+        """POST with matching CSRF cookie and header should pass through CSRF."""
+        csrf_value = "matching-csrf-token"
+        client.cookies.set("csrf_token", csrf_value)
+        response = client.post(
+            "/v1/agents/run-agent",
+            json={
+                "project_id": "550e8400-e29b-41d4-a716-446655440000",
+                "agent_type": "research",
+                "input_context": {"user_idea": "test"},
+            },
+            headers={"X-CSRF-Token": csrf_value},
+        )
+        # Should not be 403 — CSRF passes, may get 401 from auth
+        assert response.status_code != 403
+
+    def test_post_with_mismatched_tokens_fails(self, client):
+        """POST with different CSRF cookie vs header should be rejected."""
+        client.cookies.set("csrf_token", "cookie-value")
+        response = client.post(
+            "/v1/agents/run-agent",
+            json={
+                "project_id": "550e8400-e29b-41d4-a716-446655440000",
+                "agent_type": "research",
+                "input_context": {"user_idea": "test"},
+            },
+            headers={"X-CSRF-Token": "different-header-value"},
+        )
+        assert response.status_code == 403
+
+    def test_health_endpoint_exempt(self, client):
+        """Health endpoint should be exempt from CSRF checks."""
+        client.cookies.set("csrf_token", "some-token")
+        # POST to /health with cookie but no header — should still pass
+        response = client.post("/health")
+        # /health may not support POST (405) but should NOT be 403
+        assert response.status_code != 403
+
+    def test_response_sets_csrf_cookie(self, client):
+        """GET request response should set a csrf_token cookie."""
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert "csrf_token" in response.cookies

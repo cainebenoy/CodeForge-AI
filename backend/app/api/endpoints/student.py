@@ -12,6 +12,8 @@ from app.core.auth import CurrentUser, get_current_user
 from app.core.exceptions import ResourceNotFoundError, ValidationError
 from app.core.logging import logger
 from app.schemas.protocol import (
+    ChoiceFrameworkRequest,
+    ChoiceSelection,
     RoadmapCreate,
     RoadmapProgressUpdate,
     SessionCreate,
@@ -232,6 +234,136 @@ async def list_sessions(
         "project_id": project_id,
         "count": len(sessions),
         "sessions": sessions,
+    }
+
+
+# ──────────────────────────────────────────────────────────────
+# Choice Framework endpoints
+# ──────────────────────────────────────────────────────────────
+
+
+@router.post("/{project_id}/choice")
+async def generate_choice_framework(
+    project_id: str,
+    body: ChoiceFrameworkRequest,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Generate a Choice Framework for an architectural decision point.
+
+    Presents the student with 2-5 implementation options to reason about.
+    This is the Student Mode "killer feature" — triggered at major
+    decision nodes in the learning roadmap.
+
+    Body:
+    - decision_context: What architectural decision needs to be made
+    - module_index: Which roadmap module triggered this decision
+
+    Returns: ChoiceFramework with options, pros/cons, and recommendation
+
+    Security:
+    - Auth required
+    - Ownership check
+    - Student mode only
+    - module_index bounds validated
+    """
+    await _verify_project_ownership(project_id, user)
+
+    # Get roadmap to validate module_index and extract context
+    roadmap = await DatabaseOperations.get_roadmap(project_id)
+    if not roadmap:
+        raise ResourceNotFoundError("Roadmap", project_id)
+
+    modules = roadmap.get("modules", [])
+    if body.module_index >= len(modules):
+        raise ValidationError(
+            "module_index",
+            f"Module index {body.module_index} is out of range (max: {len(modules) - 1})",
+        )
+
+    # Build context from the roadmap module
+    module = modules[body.module_index]
+    module_context = (
+        json.dumps(module, indent=2) if isinstance(module, dict) else str(module)
+    )
+
+    # Get project for skill level context
+    project = await DatabaseOperations.get_project(project_id, user_id=user.id)
+    # Infer skill level from roadmap or default to beginner
+    skill_level = "beginner"
+    if project.get("requirements_spec") and isinstance(
+        project["requirements_spec"], dict
+    ):
+        # Try to extract from requirements if available
+        skill_level = project["requirements_spec"].get("skill_level", "beginner")
+
+    from app.agents.pedagogy_agent import run_choice_framework
+
+    result = await run_choice_framework(
+        decision_context=body.decision_context,
+        student_skill_level=skill_level,
+        project_context=module_context,
+    )
+
+    logger.info(
+        f"Generated choice framework for project {project_id}, "
+        f"module {body.module_index}: {len(result.options)} options"
+    )
+    return result.model_dump()
+
+
+@router.put("/{project_id}/choice")
+async def save_choice_selection(
+    project_id: str,
+    body: ChoiceSelection,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Record the student's choice from a Choice Framework.
+
+    Stores the selected option_id in the roadmap module's JSONB data
+    so subsequent pedagogy steps can adapt to the student's decision.
+
+    Body:
+    - module_index: Which roadmap module
+    - option_id: ID of the chosen implementation option
+
+    Security:
+    - Auth required
+    - Ownership check
+    - Student mode only
+    - module_index bounds validated
+    """
+    await _verify_project_ownership(project_id, user)
+
+    roadmap = await DatabaseOperations.get_roadmap(project_id)
+    if not roadmap:
+        raise ResourceNotFoundError("Roadmap", project_id)
+
+    modules = roadmap.get("modules", [])
+    if body.module_index >= len(modules):
+        raise ValidationError(
+            "module_index",
+            f"Module index {body.module_index} is out of range (max: {len(modules) - 1})",
+        )
+
+    # Store the choice in the module's JSONB
+    modules[body.module_index]["chosen_option"] = body.option_id
+
+    # Update the roadmap modules in the database
+    await DatabaseOperations.update_roadmap_modules(
+        roadmap_id=roadmap["id"],
+        modules=modules,
+    )
+
+    logger.info(
+        f"Saved choice for project {project_id}, "
+        f"module {body.module_index}: option={body.option_id}"
+    )
+    return {
+        "message": "Choice recorded",
+        "module_index": body.module_index,
+        "option_id": body.option_id,
     }
 
 

@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.schemas.protocol import LearningModule, LearningRoadmap
+from app.schemas.protocol import ChoiceFramework, LearningModule, LearningRoadmap
 from tests.conftest import mock_lcel_chain
 
 # ──────────────────────────────────────────────────────────────
@@ -380,3 +380,172 @@ class TestProgressEndpoint:
             data = response.json()
             assert data["percent_complete"] == 0.0
             assert data["total_modules"] == 0
+
+
+# ──────────────────────────────────────────────────────────────
+# Choice Framework endpoints
+# ──────────────────────────────────────────────────────────────
+
+
+SAMPLE_CHOICE_FRAMEWORK = ChoiceFramework(
+    context="How should we manage application state?",
+    options=[
+        {
+            "id": "zustand",
+            "title": "Zustand (Simple Store)",
+            "pros": ["Minimal boilerplate", "Easy to learn"],
+            "cons": ["Less ecosystem"],
+            "difficulty": "beginner",
+            "educational_value": "Learn fundamental state management patterns",
+        },
+        {
+            "id": "redux",
+            "title": "Redux Toolkit",
+            "pros": ["Industry standard", "Rich ecosystem"],
+            "cons": ["More boilerplate", "Steeper learning curve"],
+            "difficulty": "intermediate",
+            "educational_value": "Learn flux architecture and action-reducer patterns",
+        },
+    ],
+    recommendation="Start with Zustand for a beginner.",
+)
+
+
+class TestChoiceFrameworkEndpoints:
+    """Choice Framework endpoint tests"""
+
+    def test_generate_choice_framework(self, client, auth_headers):
+        """POST /v1/student/{id}/choice should generate choices"""
+        with (
+            _mock_db_for_student() as mock_db,
+            patch(
+                "app.agents.pedagogy_agent.run_choice_framework",
+                new_callable=AsyncMock,
+                return_value=SAMPLE_CHOICE_FRAMEWORK,
+            ),
+        ):
+            mock_db.get_project = AsyncMock(return_value=SAMPLE_STUDENT_PROJECT)
+            mock_db.get_roadmap = AsyncMock(return_value=SAMPLE_ROADMAP_DB)
+
+            response = client.post(
+                f"/v1/student/{STUDENT_PROJECT_ID}/choice",
+                json={
+                    "decision_context": "How should we manage application state?",
+                    "module_index": 0,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data["options"]) == 2
+            assert data["options"][0]["id"] == "zustand"
+            assert data["context"] == "How should we manage application state?"
+
+    def test_generate_choice_framework_invalid_module_index(self, client, auth_headers):
+        """Should reject module_index out of range"""
+        with _mock_db_for_student() as mock_db:
+            mock_db.get_project = AsyncMock(return_value=SAMPLE_STUDENT_PROJECT)
+            mock_db.get_roadmap = AsyncMock(return_value=SAMPLE_ROADMAP_DB)
+
+            response = client.post(
+                f"/v1/student/{STUDENT_PROJECT_ID}/choice",
+                json={
+                    "decision_context": "How should we manage application state?",
+                    "module_index": 99,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == 400
+
+    def test_generate_choice_framework_no_roadmap(self, client, auth_headers):
+        """Should 404 if no roadmap exists"""
+        with _mock_db_for_student() as mock_db:
+            mock_db.get_project = AsyncMock(return_value=SAMPLE_STUDENT_PROJECT)
+            mock_db.get_roadmap = AsyncMock(return_value=None)
+
+            response = client.post(
+                f"/v1/student/{STUDENT_PROJECT_ID}/choice",
+                json={
+                    "decision_context": "How should we manage application state?",
+                    "module_index": 0,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == 404
+
+    def test_generate_choice_framework_builder_mode_rejected(
+        self, client, auth_headers
+    ):
+        """Should reject choice framework for builder-mode projects"""
+        with _mock_db_for_student() as mock_db:
+            mock_db.get_project = AsyncMock(return_value=BUILDER_PROJECT)
+
+            response = client.post(
+                f"/v1/student/{STUDENT_PROJECT_ID}/choice",
+                json={
+                    "decision_context": "How should we manage application state?",
+                    "module_index": 0,
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == 400
+
+    def test_save_choice_selection(self, client, auth_headers):
+        """PUT /v1/student/{id}/choice should save the selection"""
+        with (
+            _mock_db_for_student() as mock_db,
+            patch(
+                "app.api.endpoints.student.DatabaseOperations.update_roadmap_modules",
+                new_callable=AsyncMock,
+                return_value=SAMPLE_ROADMAP_DB,
+            ) as mock_update,
+        ):
+            mock_db.get_project = AsyncMock(return_value=SAMPLE_STUDENT_PROJECT)
+            mock_db.get_roadmap = AsyncMock(return_value=SAMPLE_ROADMAP_DB)
+
+            response = client.put(
+                f"/v1/student/{STUDENT_PROJECT_ID}/choice",
+                json={
+                    "module_index": 0,
+                    "option_id": "zustand",
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["option_id"] == "zustand"
+            assert data["module_index"] == 0
+            mock_update.assert_called_once()
+
+    def test_save_choice_selection_invalid_module(self, client, auth_headers):
+        """Should reject choice selection with invalid module_index"""
+        with _mock_db_for_student() as mock_db:
+            mock_db.get_project = AsyncMock(return_value=SAMPLE_STUDENT_PROJECT)
+            mock_db.get_roadmap = AsyncMock(return_value=SAMPLE_ROADMAP_DB)
+
+            response = client.put(
+                f"/v1/student/{STUDENT_PROJECT_ID}/choice",
+                json={
+                    "module_index": 99,
+                    "option_id": "zustand",
+                },
+                headers=auth_headers,
+            )
+
+            assert response.status_code == 400
+
+    def test_choice_framework_requires_auth(self, client):
+        """Choice Framework endpoints should require authentication"""
+        response = client.post(
+            f"/v1/student/{STUDENT_PROJECT_ID}/choice",
+            json={
+                "decision_context": "How should we manage state?",
+                "module_index": 0,
+            },
+        )
+        assert response.status_code == 401

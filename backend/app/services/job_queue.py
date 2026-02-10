@@ -10,7 +10,7 @@ Supports two backends:
 import json
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from app.core.logging import logger
@@ -29,7 +29,9 @@ class Job:
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     progress: float = 0.0
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    clarification_data: Optional[Dict[str, Any]] = None
+    user_id: Optional[str] = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
@@ -56,7 +58,7 @@ class Job:
         d["created_at"] = (
             datetime.fromisoformat(d["created_at"])
             if d.get("created_at")
-            else datetime.utcnow()
+            else datetime.now(timezone.utc)
         )
         d["started_at"] = (
             datetime.fromisoformat(d["started_at"]) if d.get("started_at") else None
@@ -89,6 +91,7 @@ class BaseJobStore(ABC):
         project_id: str,
         agent_type: str,
         input_context: Dict[str, Any],
+        user_id: Optional[str] = None,
     ) -> Job: ...
 
     @abstractmethod
@@ -130,12 +133,14 @@ class InMemoryJobStore(BaseJobStore):
         project_id: str,
         agent_type: str,
         input_context: Dict[str, Any],
+        user_id: Optional[str] = None,
     ) -> Job:
         job = Job(
             job_id=job_id,
             project_id=project_id,
             agent_type=agent_type,
             input_context=input_context,
+            user_id=user_id,
         )
         self._jobs[job_id] = job
         if project_id not in self._project_jobs:
@@ -162,9 +167,9 @@ class InMemoryJobStore(BaseJobStore):
         if status:
             job.status = status
             if status == JobStatusType.RUNNING and not job.started_at:
-                job.started_at = datetime.utcnow()
+                job.started_at = datetime.now(timezone.utc)
             if job.is_complete:
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
 
         if progress is not None:
             job.progress = max(0.0, min(100.0, progress))
@@ -175,7 +180,7 @@ class InMemoryJobStore(BaseJobStore):
         if error:
             job.error = error
             job.status = JobStatusType.FAILED
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
 
         logger.info(
             f"[InMemory] Updated job {job_id}: status={job.status.value}, progress={job.progress}"
@@ -191,7 +196,7 @@ class InMemoryJobStore(BaseJobStore):
         return [j for j in self._jobs.values() if j.status == JobStatusType.QUEUED]
 
     def cleanup_old_jobs(self, hours: int = 24) -> int:
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         to_remove = [
             job_id
             for job_id, job in self._jobs.items()
@@ -239,12 +244,14 @@ class RedisJobStore(BaseJobStore):
         project_id: str,
         agent_type: str,
         input_context: Dict[str, Any],
+        user_id: Optional[str] = None,
     ) -> Job:
         job = Job(
             job_id=job_id,
             project_id=project_id,
             agent_type=agent_type,
             input_context=input_context,
+            user_id=user_id,
         )
         pipe = self._redis.pipeline()
         pipe.set(f"job:{job_id}", job.serialize())
@@ -275,9 +282,9 @@ class RedisJobStore(BaseJobStore):
         if status:
             job.status = status
             if status == JobStatusType.RUNNING and not job.started_at:
-                job.started_at = datetime.utcnow()
+                job.started_at = datetime.now(timezone.utc)
             if job.is_complete:
-                job.completed_at = datetime.utcnow()
+                job.completed_at = datetime.now(timezone.utc)
 
         if progress is not None:
             job.progress = max(0.0, min(100.0, progress))
@@ -288,7 +295,7 @@ class RedisJobStore(BaseJobStore):
         if error:
             job.error = error
             job.status = JobStatusType.FAILED
-            job.completed_at = datetime.utcnow()
+            job.completed_at = datetime.now(timezone.utc)
 
         pipe = self._redis.pipeline()
         pipe.set(f"job:{job_id}", job.serialize())
@@ -335,7 +342,7 @@ class RedisJobStore(BaseJobStore):
         Remove completed jobs older than specified hours.
         Redis TTL handles most cleanup; this cleans sorted set references.
         """
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         cutoff_ts = cutoff.timestamp()
         removed = 0
         cursor = 0

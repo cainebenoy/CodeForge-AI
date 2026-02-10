@@ -18,6 +18,7 @@ from app.schemas.protocol import (
     PaginatedResponse,
     ProjectCreate,
     ProjectUpdate,
+    RefactorRequest,
 )
 from app.services.database import DatabaseOperations
 from app.services.validation import InputValidator
@@ -324,6 +325,71 @@ async def delete_file(
     logger.info(f"Deleting file {file_path} from project {project_id}")
     await DatabaseOperations.delete_file(project_id, file_path)
     return {"message": "File deleted", "path": file_path}
+
+
+# ──────────────────────────────────────────────────────────────
+# Refactor with AI
+# ──────────────────────────────────────────────────────────────
+
+
+@router.post("/{project_id}/files/{file_path:path}/refactor", response_model=dict)
+async def refactor_file(
+    file_path: str,
+    body: RefactorRequest,
+    project_id: str = Depends(validate_project_id),
+    user: CurrentUser = Depends(get_current_user),
+    apply: bool = False,
+) -> dict:
+    """
+    Refactor a code segment in a file using AI.
+
+    Select code → "Refactor with AI" → returns refactored code with explanation.
+
+    Body:
+    - selected_code: The highlighted code segment (max 50KB)
+    - instruction: What to do (e.g. "Make this more accessible")
+
+    Query params:
+    - apply: If true, auto-apply the refactored code to the file
+
+    Returns: RefactorResult with original, refactored code, explanation, and full file
+
+    Security:
+    - Auth required
+    - Ownership check on the parent project
+    - Path traversal validation
+    - Content size limited by Pydantic schema
+    """
+    InputValidator.validate_file_path(file_path)
+    await DatabaseOperations.get_project(project_id, user_id=user.id)
+
+    # Fetch the full file content for context
+    file_record = await DatabaseOperations.get_file(project_id, file_path)
+    full_content = file_record.get("content", "")
+
+    logger.info(
+        f"Refactoring {file_path} in project {project_id}: '{body.instruction[:60]}...'"
+    )
+
+    from app.agents.code_agent import run_refactor_agent
+
+    result = await run_refactor_agent(
+        file_path=file_path,
+        selected_code=body.selected_code,
+        instruction=body.instruction,
+        full_file_content=full_content,
+    )
+
+    # Optionally auto-apply the refactored code
+    if apply:
+        await DatabaseOperations.update_file(
+            project_id=project_id,
+            file_path=file_path,
+            content=result.full_file_content,
+        )
+        logger.info(f"Auto-applied refactor to {file_path}")
+
+    return result.model_dump()
 
 
 # ──────────────────────────────────────────────────────────────

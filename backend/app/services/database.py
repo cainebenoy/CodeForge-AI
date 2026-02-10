@@ -351,10 +351,18 @@ class DatabaseOperations:
     ) -> Dict[str, Any]:
         """
         Update an existing file's content (and optionally language).
+        Increments the version counter on each update.
         Raises ResourceNotFoundError if the file doesn't exist.
         """
         try:
-            update_data: Dict[str, Any] = {"content": content}
+            # First get current version
+            current = await DatabaseOperations.get_file(project_id, file_path)
+            current_version = current.get("version", 1)
+
+            update_data: Dict[str, Any] = {
+                "content": content,
+                "version": current_version + 1,
+            }
             if language:
                 update_data["language"] = language
 
@@ -369,7 +377,10 @@ class DatabaseOperations:
             )
 
             if response.data:
-                logger.info(f"Updated file: {file_path} (project {project_id})")
+                logger.info(
+                    f"Updated file: {file_path} (project {project_id}, "
+                    f"v{current_version} → v{current_version + 1})"
+                )
                 return response.data[0]
             else:
                 raise ResourceNotFoundError("File", file_path)
@@ -511,9 +522,145 @@ class DatabaseOperations:
             logger.error(f"Error updating roadmap progress: {str(e)}")
             raise ExternalServiceError("Supabase", str(e))
 
+    @staticmethod
+    async def update_roadmap_modules(roadmap_id: str, modules: list) -> Dict[str, Any]:
+        """
+        Update the modules JSONB of a roadmap.
+        Used by the Choice Framework to persist student selections.
+        Raises ResourceNotFoundError if roadmap doesn't exist.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("learning_roadmaps")
+                    .update({"modules": modules})
+                    .eq("id", roadmap_id)
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Updated roadmap modules for {roadmap_id}")
+                return response.data[0]
+            else:
+                raise ResourceNotFoundError("Roadmap", roadmap_id)
+        except ResourceNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating roadmap modules: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
     # ──────────────────────────────────────────────────────────
     # Daily Session operations (Student Mode)
     # ──────────────────────────────────────────────────────────
+
+    # ──────────────────────────────────────────────────────────
+    # Profile operations
+    # ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def get_profile(user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Get a user's profile by ID.
+        Returns None if no profile exists.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("profiles")
+                    .select("*")
+                    .eq("id", user_id)
+                    .single()
+                    .execute()
+                )
+            )
+
+            if not response.data:
+                return None
+
+            logger.info(f"Retrieved profile for user: {user_id}")
+            return response.data
+        except Exception as e:
+            # single() raises on no rows - treat as not found
+            if "No rows" in str(e) or "0 rows" in str(e) or "JSON" in str(e):
+                return None
+            logger.error(f"Error fetching profile: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def create_profile(
+        user_id: str,
+        username: Optional[str] = None,
+        full_name: Optional[str] = None,
+        avatar_url: Optional[str] = None,
+        skill_level: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a profile for a user.
+        Uses upsert so it's idempotent (Supabase Auth trigger may have created it).
+        """
+        try:
+            data: Dict[str, Any] = {"id": user_id}
+            if username is not None:
+                data["username"] = username
+            if full_name is not None:
+                data["full_name"] = full_name
+            if avatar_url is not None:
+                data["avatar_url"] = avatar_url
+            if skill_level is not None:
+                data["skill_level"] = skill_level
+
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("profiles")
+                    .upsert(data)
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Created/updated profile for user: {user_id}")
+                return response.data[0]
+            else:
+                raise ExternalServiceError("Supabase", "Failed to create profile")
+        except Exception as e:
+            logger.error(f"Error creating profile: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def update_profile(
+        user_id: str, data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Update a user's profile. Only allows known fields.
+        Raises ResourceNotFoundError if profile doesn't exist.
+        """
+        allowed_fields = {"username", "full_name", "avatar_url", "skill_level"}
+        filtered = {k: v for k, v in data.items() if k in allowed_fields}
+
+        if not filtered:
+            raise ValidationError("data", "No valid fields to update")
+
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("profiles")
+                    .update(filtered)
+                    .eq("id", user_id)
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Updated profile for user: {user_id}")
+                return response.data[0]
+            else:
+                raise ResourceNotFoundError("Profile", user_id)
+        except ResourceNotFoundError:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating profile: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
 
     @staticmethod
     async def create_session(
@@ -534,6 +681,7 @@ class DatabaseOperations:
                             "project_id": project_id,
                             "transcript": transcript,
                             "concepts_covered": concepts_covered,
+                            "duration_minutes": duration_minutes,
                         }
                     )
                     .execute()

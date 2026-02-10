@@ -15,6 +15,7 @@ from app.api.router import api_router
 from app.core.config import settings
 from app.core.exceptions import CodeForgeException
 from app.core.logging import logger
+from app.middleware.csrf import csrf_middleware
 from app.middleware.rate_limiter import rate_limit_middleware
 from app.middleware.request_tracking import logging_middleware, request_id_middleware
 
@@ -104,13 +105,17 @@ async def _rate_limit_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# 2. CORS middleware - HTTPS only in production
+# 3. CSRF protection — double-submit cookie for state-changing requests
+app.middleware("http")(csrf_middleware)
+
+
+# 4. CORS middleware - HTTPS only in production
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization", "X-User-ID"],
+    allow_headers=["Content-Type", "Authorization"],
     max_age=3600,
 )
 
@@ -137,7 +142,7 @@ async def health_check():
         supabase_client.table("projects").select("id").limit(1).execute()
         deps["supabase"] = "ok"
     except Exception as e:
-        deps["supabase"] = f"degraded: {type(e).__name__}"
+        deps["supabase"] = "degraded"
         overall = "degraded"
 
     # --- Redis (optional) ---
@@ -151,7 +156,7 @@ async def health_check():
         else:
             deps["redis"] = "not configured (in-memory fallback)"
     except Exception as e:
-        deps["redis"] = f"degraded: {type(e).__name__}"
+        deps["redis"] = "degraded"
         overall = "degraded"
 
     return {

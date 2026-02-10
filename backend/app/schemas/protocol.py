@@ -19,6 +19,7 @@ class AgentType(str, Enum):
     CODE = "code"
     QA = "qa"
     PEDAGOGY = "pedagogy"
+    ROADMAP = "roadmap"
 
 
 class JobStatusType(str, Enum):
@@ -122,7 +123,9 @@ class ProjectUpdate(BaseModel):
 
     title: Optional[str] = Field(None, min_length=3, max_length=200)
     description: Optional[str] = Field(None, max_length=1000)
-    status: Optional[str] = Field(None, pattern="^(planning|in-progress|completed)$")
+    status: Optional[str] = Field(
+        None, pattern="^(planning|in-progress|completed|archived)$"
+    )
 
 
 # Agent output schemas (Pydantic enforced - prevents hallucinated outputs)
@@ -371,6 +374,33 @@ class ChoiceFramework(BaseModel):
     )
 
 
+class ChoiceFrameworkRequest(BaseModel):
+    """Request to generate a choice framework for a decision point"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    decision_context: str = Field(
+        ...,
+        min_length=10,
+        max_length=2000,
+        description="What architectural decision needs to be made",
+    )
+    module_index: int = Field(
+        ..., ge=0, description="Index of the roadmap module this decision relates to"
+    )
+
+
+class ChoiceSelection(BaseModel):
+    """Request to record a student's choice from the framework"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    module_index: int = Field(..., ge=0, description="Index of the roadmap module")
+    option_id: str = Field(
+        ..., min_length=1, max_length=50, description="ID of the chosen option"
+    )
+
+
 class CodeFileCreate(BaseModel):
     """Create a code file in project"""
 
@@ -524,6 +554,7 @@ class GitHubExportRequest(BaseModel):
         ...,
         min_length=1,
         max_length=500,
+        repr=False,
         description="GitHub personal access token (never stored)",
     )
 
@@ -543,3 +574,142 @@ class StudentProgress(BaseModel):
     percent_complete: float = Field(..., ge=0.0, le=100.0)
     total_sessions: int = Field(..., ge=0)
     total_time_minutes: int = Field(..., ge=0)
+
+
+# --- Research Agent Clarification schemas ---
+
+
+class ClarificationQuestion(BaseModel):
+    """A single clarifying question from the Research Agent"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(
+        ..., min_length=10, max_length=500, description="The clarifying question"
+    )
+    why: str = Field(
+        ...,
+        min_length=5,
+        max_length=500,
+        description="Why this clarification matters",
+    )
+    options: Optional[List[str]] = Field(
+        None, max_length=6, description="Suggested answer options"
+    )
+
+
+class ClarificationResponse(BaseModel):
+    """Research Agent clarification output — questions to ask the user"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    questions: List[ClarificationQuestion] = Field(
+        ..., min_length=1, max_length=5, description="Clarifying questions"
+    )
+    is_complete: bool = Field(
+        default=False, description="Whether the spec can be generated without answers"
+    )
+
+
+class ClarificationAnswer(BaseModel):
+    """User's answers to clarification questions"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    answers: List[Dict[str, str]] = Field(
+        ...,
+        min_length=1,
+        max_length=5,
+        description="List of {question: answer} pairs",
+    )
+
+
+# --- Refactor schemas ---
+
+
+class RefactorRequest(BaseModel):
+    """Request to refactor a code segment"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    selected_code: str = Field(
+        ...,
+        min_length=1,
+        max_length=50000,
+        description="The highlighted code segment to refactor",
+    )
+    instruction: str = Field(
+        ...,
+        min_length=3,
+        max_length=2000,
+        description="What to do with the code (e.g. 'Make this more accessible')",
+    )
+
+
+class RefactorResult(BaseModel):
+    """Refactor Agent output"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    original_code: str = Field(
+        ..., min_length=1, description="The original selected code"
+    )
+    refactored_code: str = Field(
+        ..., min_length=1, description="The refactored code segment"
+    )
+    explanation: str = Field(
+        ...,
+        min_length=5,
+        max_length=2000,
+        description="What was changed and why",
+    )
+    full_file_content: str = Field(
+        ...,
+        min_length=1,
+        description="Complete file content with refactored segment applied",
+    )
+
+
+# --- Profile schemas ---
+
+
+class ProfileRead(BaseModel):
+    """Profile data returned from the API"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(..., description="User UUID (matches auth.users id)")
+    username: Optional[str] = Field(None, max_length=50)
+    full_name: Optional[str] = Field(None, max_length=200)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+    skill_level: Optional[str] = Field(
+        None, pattern="^(beginner|intermediate|advanced)$"
+    )
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class ProfileCreate(BaseModel):
+    """Create profile request (used if auto-creation via trigger is not available)"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    username: Optional[str] = Field(None, min_length=2, max_length=50)
+    full_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+    skill_level: Optional[str] = Field(
+        None, pattern="^(beginner|intermediate|advanced)$"
+    )
+
+
+class ProfileUpdate(BaseModel):
+    """Update profile request"""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    username: Optional[str] = Field(None, min_length=2, max_length=50)
+    full_name: Optional[str] = Field(None, min_length=1, max_length=200)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+    skill_level: Optional[str] = Field(
+        None, pattern="^(beginner|intermediate|advanced)$"
+    )

@@ -67,6 +67,7 @@ async def run_agent_workflow(
         "code": 300,
         "qa": 120,
         "pedagogy": 120,
+        "roadmap": 180,
     }
     timeout = timeouts.get(request.agent_type, settings.AGENT_TIMEOUT)
 

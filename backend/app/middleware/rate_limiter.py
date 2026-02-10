@@ -27,15 +27,37 @@ from app.core.logging import logger
 def get_rate_limit_key(request: Request) -> str:
     """
     Generate rate limit key from request.
-    Uses authenticated user ID when available, otherwise falls back to IP.
+    Uses authenticated user ID from JWT when available, otherwise falls back to IP.
+
+    Security: Extracts user ID from the JWT 'sub' claim in the Authorization header.
+    This is more reliable than trusting a client-supplied X-User-ID header.
     """
     client_ip = request.client.host if request.client else "unknown"
 
-    # Try to get user_id from headers
-    user_id = request.headers.get("X-User-ID", "")
+    # Try to extract user ID from the JWT Authorization header
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        try:
+            import jwt as pyjwt
 
-    if user_id:
-        return f"user:{user_id}"
+            from app.core.config import settings
+
+            token = auth_header[7:]
+            # Decode without full validation — just extract sub for keying
+            payload = pyjwt.decode(
+                token,
+                settings.SUPABASE_JWT_SECRET,
+                algorithms=["HS256"],
+                audience="authenticated",
+                options={"require": ["sub"]},
+            )
+            user_id = payload.get("sub")
+            if user_id:
+                return f"user:{user_id}"
+        except Exception:
+            # If JWT decode fails, fall back to IP-based limiting
+            pass
+
     return f"ip:{client_ip}"
 
 

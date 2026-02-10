@@ -18,6 +18,7 @@ from app.agents.graph.nodes import (
     pedagogy_node,
     qa_node,
     research_node,
+    roadmap_node,
     should_retry_code,
     wireframe_node,
 )
@@ -38,6 +39,7 @@ AGENT_NODE_MAP = {
     "code": code_node,
     "qa": qa_node,
     "pedagogy": pedagogy_node,
+    "roadmap": roadmap_node,
 }
 
 # Maps agent output keys to progress percentages for single-agent runs
@@ -47,6 +49,7 @@ SINGLE_AGENT_RESULT_KEYS = {
     "code": "generated_code",
     "qa": "qa_result",
     "pedagogy": "pedagogy_response",
+    "roadmap": "roadmap",
 }
 
 

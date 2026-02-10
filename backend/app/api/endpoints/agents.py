@@ -19,9 +19,11 @@ from app.schemas.protocol import (
     AgentRequest,
     AgentResponse,
     AgentType,
+    ClarificationAnswer,
     JobStatus,
     JobStatusType,
 )
+from app.services.database import DatabaseOperations
 from app.services.job_queue import job_store
 from app.services.validation import InputValidator
 
@@ -87,6 +89,7 @@ async def run_agent(
             project_id=request.project_id,
             agent_type=request.agent_type,
             input_context=sanitized_context,
+            user_id=user.id,
         )
 
         logger.info(
@@ -110,6 +113,7 @@ async def run_agent(
             "code": "5-10 minutes",
             "qa": "1-2 minutes",
             "pedagogy": "1-2 minutes",
+            "roadmap": "2-3 minutes",
         }
 
         return AgentResponse(
@@ -121,6 +125,96 @@ async def run_agent(
     except Exception as e:
         logger.error(f"Error creating agent job: {str(e)}")
         raise
+
+
+@router.post("/run-pipeline", response_model=AgentResponse)
+async def run_pipeline(
+    request: AgentRequest,
+    user: CurrentUser = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
+) -> AgentResponse:
+    """
+    Trigger the full builder pipeline: research → wireframe → code → qa.
+
+    Runs all agents sequentially with a code→qa retry loop.
+    The agent_type field in the request is ignored (always runs full pipeline).
+
+    Request body:
+    - project_id: UUID of project to build
+    - input_context: Must contain 'user_idea' at minimum
+
+    Returns job_id for status polling via GET /v1/agents/jobs/{job_id}
+
+    Security:
+    - Auth required
+    - Ownership verified
+    - Input validated and sanitized
+    """
+    job_id = str(uuid4())
+
+    try:
+        await DatabaseOperations.get_project(request.project_id, user_id=user.id)
+
+        sanitized_context = InputValidator.sanitize_dict(request.input_context)
+
+        job = job_store.create_job(
+            job_id=job_id,
+            project_id=request.project_id,
+            agent_type="builder",
+            input_context=sanitized_context,
+            user_id=user.id,
+        )
+
+        logger.info(
+            f"Created builder pipeline job: {job_id} (project={request.project_id})"
+        )
+
+        if background_tasks:
+            background_tasks.add_task(
+                execute_pipeline_background,
+                job_id=job_id,
+                project_id=request.project_id,
+                input_context=sanitized_context,
+            )
+
+        return AgentResponse(
+            job_id=job_id,
+            status=JobStatusType.QUEUED,
+            estimated_time="10-15 minutes",
+        )
+
+    except Exception as e:
+        logger.error(f"Error creating pipeline job: {str(e)}")
+        raise
+
+
+async def execute_pipeline_background(
+    job_id: str, project_id: str, input_context: dict
+):
+    """Execute the full builder pipeline in background."""
+    try:
+        logger.info(f"Starting builder pipeline for job {job_id}")
+        job_store.update_job(job_id, status=JobStatusType.RUNNING, progress=5)
+
+        from app.agents.orchestrator import run_builder_pipeline
+
+        result = await run_builder_pipeline(
+            job_id=job_id,
+            project_id=project_id,
+            input_context=input_context,
+        )
+
+        job_store.update_job(
+            job_id,
+            status=JobStatusType.COMPLETED,
+            progress=100,
+            result=result,
+        )
+        logger.info(f"Completed builder pipeline job {job_id}")
+
+    except Exception as e:
+        logger.error(f"Builder pipeline failed: {job_id} - {str(e)}")
+        job_store.update_job(job_id, error=str(e), progress=0)
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
@@ -151,6 +245,12 @@ async def get_job_status(
     job = job_store.get_job(job_id)
     if not job:
         raise ResourceNotFoundError("Job", job_id)
+
+    # Authorization: verify the requesting user owns this job
+    if job.user_id and job.user_id != user.id:
+        from app.core.exceptions import PermissionError
+
+        raise PermissionError("You do not have access to this job")
 
     logger.debug(f"Retrieved job status: {job_id} ({job.status})")
 
@@ -186,6 +286,11 @@ async def list_project_jobs(
 
     InputValidator.validate_uuid(project_id)
 
+    # Verify user owns this project
+    from app.services.database import DatabaseOperations
+
+    await DatabaseOperations.get_project(project_id, user_id=user.id)
+
     jobs = job_store.get_project_jobs(project_id, limit=limit)
 
     return {
@@ -198,7 +303,12 @@ async def list_project_jobs(
 async def execute_agent_background(job_id: str, request: AgentRequest):
     """
     Execute agent in background
-    Updates job status as it progresses
+    Updates job status as it progresses.
+
+    For research agents: runs the clarification phase first.
+    The clarification questions are stored in the job result with is_complete=False.
+    The user then calls POST /v1/agents/jobs/{job_id}/respond with answers,
+    which triggers the final spec generation.
     """
     try:
         logger.info(f"Starting background execution for job {job_id}")
@@ -206,10 +316,86 @@ async def execute_agent_background(job_id: str, request: AgentRequest):
         # Update status to running
         job_store.update_job(job_id, status=JobStatusType.RUNNING, progress=10)
 
-        # Import agent implementations when needed (avoid circular imports)
+        # Research agent: check if we should run clarification first
+        if request.agent_type == "research":
+            # Check if clarifications were already provided (respond flow)
+            clarifications = request.input_context.get("_clarifications")
+            if clarifications:
+                # Phase 2: Generate final spec with clarification answers
+                from app.agents.research_agent import run_research_with_context
+
+                result_obj = await run_research_with_context(
+                    user_idea=request.input_context.get("user_idea", ""),
+                    target_audience=request.input_context.get("target_audience", ""),
+                    clarifications=clarifications,
+                )
+                result = result_obj.model_dump()
+
+                # Persist to database
+                from app.services.database import DatabaseOperations
+
+                await DatabaseOperations.update_project(
+                    request.project_id,
+                    {"status": "in-progress", "requirements_spec": result},
+                )
+
+                job_store.update_job(
+                    job_id,
+                    status=JobStatusType.COMPLETED,
+                    progress=100,
+                    result=result,
+                )
+                logger.info(f"Completed research job {job_id} (with clarifications)")
+                return
+
+            # Phase 1: Run clarification phase
+            skip_clarification = request.input_context.get("skip_clarification", False)
+            if not skip_clarification:
+                try:
+                    from app.agents.research_agent import run_research_clarification
+
+                    job_store.update_job(job_id, progress=30)
+
+                    clarify_result = await run_research_clarification(
+                        user_idea=request.input_context.get("user_idea", ""),
+                        target_audience=request.input_context.get(
+                            "target_audience", ""
+                        ),
+                    )
+
+                    # Store clarification data and mark as needing response
+                    job = job_store.get_job(job_id)
+                    if job:
+                        job.clarification_data = {
+                            "original_context": request.input_context,
+                            "project_id": request.project_id,
+                        }
+
+                    job_store.update_job(
+                        job_id,
+                        status=JobStatusType.COMPLETED,
+                        progress=100,
+                        result={
+                            "is_complete": False,
+                            "questions": clarify_result.model_dump()["questions"],
+                            "message": "Please answer the clarifying questions and "
+                            "submit via POST /v1/agents/jobs/{job_id}/respond",
+                        },
+                    )
+                    logger.info(
+                        f"Clarification phase complete for job {job_id}: "
+                        f"{len(clarify_result.questions)} questions"
+                    )
+                    return
+                except Exception as clarify_err:
+                    # If clarification fails, fall through to direct generation
+                    logger.warning(
+                        f"Clarification failed, falling back to direct: {clarify_err}"
+                    )
+
+        # Standard agent execution (non-research or skip_clarification)
         from app.agents.orchestrator import run_agent_workflow
 
-        # Execute agent (this should be async in future)
         result = await run_agent_workflow(
             job_id=job_id,
             request=request,
@@ -228,6 +414,96 @@ async def execute_agent_background(job_id: str, request: AgentRequest):
     except Exception as e:
         logger.error(f"Agent job failed: {job_id} - {str(e)}")
         job_store.update_job(job_id, error=str(e), progress=0)
+
+
+@router.post("/jobs/{job_id}/respond")
+async def respond_to_clarification(
+    job_id: str,
+    body: ClarificationAnswer,
+    user: CurrentUser = Depends(get_current_user),
+    background_tasks: BackgroundTasks = None,
+):
+    """
+    Submit answers to the Research Agent's clarifying questions.
+
+    After triggering a research agent job, the job result may contain
+    clarifying questions (is_complete=False). Use this endpoint to submit
+    answers, which triggers the full requirements spec generation.
+
+    Body:
+    - answers: List of {question: answer} pairs
+
+    Returns: New job tracking the final spec generation
+
+    Security:
+    - Auth required
+    - Job existence validated
+    - Original project ownership re-verified
+    """
+    InputValidator.validate_uuid(job_id)
+
+    job = job_store.get_job(job_id)
+    if not job:
+        raise ResourceNotFoundError("Job", job_id)
+
+    # Verify job has clarification data
+    if not job.result or job.result.get("is_complete") is not False:
+        raise ValidationError(
+            "job_id",
+            "This job does not have pending clarification questions",
+        )
+
+    # Get original context
+    clarification_data = job.clarification_data or {}
+    original_context = clarification_data.get("original_context", {})
+    project_id = clarification_data.get("project_id") or job.project_id
+
+    # Verify the user owns the project
+    from app.services.database import DatabaseOperations
+
+    await DatabaseOperations.get_project(project_id, user_id=user.id)
+
+    # Create a new job for the final generation
+    from uuid import uuid4
+
+    new_job_id = str(uuid4())
+
+    # Build enriched context
+    enriched_context = dict(original_context)
+    enriched_context["_clarifications"] = body.answers
+    enriched_context["skip_clarification"] = True
+
+    new_request = AgentRequest(
+        project_id=project_id,
+        agent_type=AgentType.RESEARCH,
+        input_context=enriched_context,
+    )
+
+    job_store.create_job(
+        job_id=new_job_id,
+        project_id=project_id,
+        agent_type="research",
+        input_context=enriched_context,
+        user_id=user.id,
+    )
+
+    if background_tasks:
+        background_tasks.add_task(
+            execute_agent_background,
+            job_id=new_job_id,
+            request=new_request,
+        )
+
+    logger.info(
+        f"Created follow-up research job {new_job_id} with "
+        f"{len(body.answers)} clarification answers"
+    )
+
+    return AgentResponse(
+        job_id=new_job_id,
+        status=JobStatusType.QUEUED,
+        estimated_time="2-3 minutes",
+    )
 
 
 # ──────────────────────────────────────────────────────────────
@@ -268,6 +544,12 @@ async def stream_job_progress(
     job = job_store.get_job(job_id)
     if not job:
         raise ResourceNotFoundError("Job", job_id)
+
+    # Authorization: verify the requesting user owns this job
+    if job.user_id and job.user_id != user.id:
+        from app.core.exceptions import PermissionError
+
+        raise PermissionError("You do not have access to this job")
 
     # Stream timeout: agent timeout + 60s buffer
     stream_timeout = settings.AGENT_TIMEOUT + 60

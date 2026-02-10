@@ -116,11 +116,55 @@ async def qa_node(state: AgentGraphState) -> Dict[str, Any]:
     result = await run_qa_agent(code=code, file_path=file_path)
 
     result_dict = result.model_dump() if hasattr(result, "model_dump") else result
+
+    # If QA passed, store the successful pattern in RAG for future reference
+    if result_dict.get("passed"):
+        partial_state = dict(state)
+        partial_state["qa_result"] = result_dict
+        await _store_successful_pattern(partial_state)
+
     return {
         "qa_result": result_dict,
         "current_node": "qa",
         "progress": 80.0,
     }
+
+
+async def _store_successful_pattern(state: AgentGraphState) -> None:
+    """
+    Store a successful code pattern in the RAG vector store.
+    Called after QA passes — non-critical, failures are logged and swallowed.
+    """
+    try:
+        from app.agents.core.memory import store_pattern
+
+        qa_result = state.get("qa_result", {})
+        generated = state.get("generated_code", {})
+        requirements = state.get("requirements_spec", {})
+
+        if not qa_result.get("passed"):
+            return
+
+        score = qa_result.get("score", 50.0) / 100.0
+        description = generated.get("summary", "")
+        if not description:
+            description = requirements.get("elevator_pitch", "Generated code pattern")
+
+        await store_pattern(
+            project_type="code",
+            metadata={
+                "summary": generated.get("summary", ""),
+                "description": description,
+                "file_count": len(generated.get("files", [])),
+                "dependencies": generated.get("dependencies", []),
+                "qa_score": qa_result.get("score", 0),
+            },
+            description=description,
+            success_score=score,
+        )
+        logger.info(f"Stored successful pattern (score={score:.2f})")
+    except Exception as e:
+        logger.warning(f"Failed to store pattern (non-critical): {e}")
 
 
 async def pedagogy_node(state: AgentGraphState) -> Dict[str, Any]:
@@ -139,6 +183,37 @@ async def pedagogy_node(state: AgentGraphState) -> Dict[str, Any]:
     return {
         "pedagogy_response": result_dict,
         "current_node": "pedagogy",
+        "progress": 100.0,
+    }
+
+
+async def roadmap_node(state: AgentGraphState) -> Dict[str, Any]:
+    """Run the Roadmap Agent."""
+    from app.agents.roadmap_agent import run_roadmap_agent
+
+    logger.info(f"[Graph] roadmap_node — project={state.get('project_id')}")
+
+    ctx = state.get("input_context", {})
+
+    # Use requirements from state or from input_context
+    requirements = state.get("requirements_spec")
+    if requirements is None:
+        requirements = ctx.get("requirements", "")
+    if isinstance(requirements, dict):
+        import json as _json
+
+        requirements = _json.dumps(requirements, indent=2)
+
+    result = await run_roadmap_agent(
+        requirements_spec=str(requirements),
+        skill_level=ctx.get("skill_level", "beginner"),
+        focus_areas=ctx.get("focus_areas", ""),
+    )
+
+    result_dict = result.model_dump() if hasattr(result, "model_dump") else result
+    return {
+        "roadmap": result_dict,
+        "current_node": "roadmap",
         "progress": 100.0,
     }
 

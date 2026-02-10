@@ -2,7 +2,7 @@
 Tests for job queue service — InMemoryJobStore and Job serialization
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -177,7 +177,7 @@ class TestInMemoryJobStore:
         )
         job = fresh_job_store._jobs["old-job"]
         job.status = JobStatusType.COMPLETED
-        job.completed_at = datetime.utcnow() - timedelta(hours=48)
+        job.completed_at = datetime.now(timezone.utc) - timedelta(hours=48)
 
         removed = fresh_job_store.cleanup_old_jobs(hours=24)
         assert removed == 1
@@ -233,8 +233,8 @@ class TestJobSerialization:
             progress=100.0,
             input_context={"arch": "nextjs"},
         )
-        original.started_at = datetime.utcnow()
-        original.completed_at = datetime.utcnow()
+        original.started_at = datetime.now(timezone.utc)
+        original.completed_at = datetime.now(timezone.utc)
 
         restored = Job.deserialize(original.serialize())
 
@@ -263,6 +263,6 @@ class TestJobSerialization:
         job = Job(job_id="dur", project_id="p", agent_type="code")
         assert job.duration is None
 
-        job.started_at = datetime.utcnow()
+        job.started_at = datetime.now(timezone.utc)
         job.completed_at = job.started_at + timedelta(seconds=42)
         assert job.duration == pytest.approx(42.0)

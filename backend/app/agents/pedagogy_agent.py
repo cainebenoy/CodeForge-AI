@@ -10,7 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from app.agents.core.llm import get_optimal_model
 from app.agents.prompts import get_agent_prompt
 from app.core.logging import logger
-from app.schemas.protocol import PedagogyResponse
+from app.schemas.protocol import ChoiceFramework, PedagogyResponse
 
 
 async def run_pedagogy_agent(
@@ -62,4 +62,61 @@ async def run_pedagogy_agent(
     )
 
     logger.info(f"Pedagogy Agent completed: {len(result.steps)} learning steps")
+    return result
+
+
+async def run_choice_framework(
+    decision_context: str,
+    student_skill_level: str = "beginner",
+    project_context: str = "",
+) -> ChoiceFramework:
+    """
+    Choice Framework Agent execution
+
+    Generates implementation options for a student to reason about
+    at architectural decision points in their learning roadmap.
+
+    Args:
+        decision_context: What decision needs to be made
+        student_skill_level: 'beginner', 'intermediate', or 'advanced'
+        project_context: Additional project context (e.g. roadmap module info)
+
+    Returns:
+        ChoiceFramework — Pydantic-enforced with 2-5 options + recommendation
+
+    Security:
+        - Output enforced via Pydantic schema (no hallucinated fields)
+        - Input passed through LangChain prompt template
+    """
+    logger.info(f"Running Choice Framework for: {decision_context[:80]}...")
+
+    llm = get_optimal_model("pedagogy")
+    parser = PydanticOutputParser(pydantic_object=ChoiceFramework)
+
+    system_prompt = get_agent_prompt("choice_framework")
+    prompt = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt + "\n\n{format_instructions}"),
+            (
+                "human",
+                "Decision Context: {decision_context}\n\n"
+                "Student Skill Level: {student_skill_level}\n\n"
+                "Project Context:\n{project_context}\n\n"
+                "Generate implementation options for the student to choose from.",
+            ),
+        ]
+    )
+
+    chain = prompt | llm | parser
+
+    result = await chain.ainvoke(
+        {
+            "decision_context": decision_context,
+            "student_skill_level": student_skill_level,
+            "project_context": project_context or "(no additional context)",
+            "format_instructions": parser.get_format_instructions(),
+        }
+    )
+
+    logger.info(f"Choice Framework completed: {len(result.options)} options generated")
     return result
