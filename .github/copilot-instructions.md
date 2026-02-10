@@ -14,6 +14,7 @@ Communication flows: `Next.js Server Actions → FastAPI → Celery/Redis → LL
 ### 1. Server-First React Components
 
 **Default to React Server Components (RSC).** Only use `'use client'` when you need:
+
 - React hooks (`useState`, `useEffect`)
 - Event handlers (`onClick`, `onChange`)
 - Browser APIs or third-party client libs (Monaco Editor, Framer Motion)
@@ -60,14 +61,14 @@ class RequirementDoc(BaseModel):
 ```typescript
 // React Query for server data
 const { data: files } = useQuery({
-  queryKey: ['project-files', projectId],
-  queryFn: () => fetchProjectFiles(projectId)
+  queryKey: ["project-files", projectId],
+  queryFn: () => fetchProjectFiles(projectId),
 });
 
 // Zustand for local UI state
 const useEditorStore = create((set) => ({
   sidebarOpen: true,
-  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen }))
+  toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
 }));
 ```
 
@@ -82,14 +83,20 @@ Dual-channel real-time updates:
 // Frontend subscribes to agent job updates
 supabase
   .channel(`project:${id}`)
-  .on('postgres_changes', 
-    { event: '*', schema: 'public', table: 'agent_jobs',
-      filter: `project_id=eq.${id}` },
-    (payload) => queryClient.invalidateQueries(['jobs', id])
+  .on(
+    "postgres_changes",
+    {
+      event: "*",
+      schema: "public",
+      table: "agent_jobs",
+      filter: `project_id=eq.${id}`,
+    },
+    (payload) => queryClient.invalidateQueries(["jobs", id]),
   )
-  .on('postgres_changes',
-    { event: 'UPDATE', schema: 'public', table: 'projects' },
-    (payload) => queryClient.invalidateQueries(['project', id])
+  .on(
+    "postgres_changes",
+    { event: "UPDATE", schema: "public", table: "projects" },
+    (payload) => queryClient.invalidateQueries(["project", id]),
   )
   .subscribe();
 ```
@@ -135,7 +142,7 @@ supabase
 
 12. **Output Encoding**: Implement output encoding where user data is rendered into HTML, JavaScript, or SQL contexts to prevent injection attacks.
 
-13. **Resource Limits**: 
+13. **Resource Limits**:
     - Limit payload sizes
     - Cap pagination (max page size)
     - Enforce timeouts on long-running operations and external API calls
@@ -188,10 +195,12 @@ unique(project_id, path)
 ```
 
 **Agent Outputs**: Stored as JSONB in `projects` table:
+
 - `requirements_spec` (Research Agent)
 - `architecture_spec` (Wireframe Agent)
 
 **Agent Jobs**: Tracked in `agent_jobs` table with Supabase Realtime publication.
+
 - Status: `queued` → `running` → `completed`/`failed`/`cancelled`
 - Progress: 0-100%, result/error as JSONB
 
@@ -201,14 +210,14 @@ unique(project_id, path)
 
 Use the **Model Router** pattern (`app/agents/core/llm.py`) to optimize cost vs. capability:
 
-| Agent | Model | Provider | Reason |
-|---|---|---|---|
-| Research | GPT-4o | OpenAI | High reasoning for requirements |
-| Wireframe | GPT-4o | OpenAI | Architecture design |
-| Code | Gemini 1.5 Pro | Google | 1M token context for full file awareness |
-| QA | GPT-4o | OpenAI | Code review reasoning |
-| Pedagogy | Claude 3.5 Sonnet | Anthropic | Socratic mentoring style |
-| Roadmap | Claude 3.5 Sonnet | Anthropic | Curriculum design |
+| Agent     | Model             | Provider  | Reason                                   |
+| --------- | ----------------- | --------- | ---------------------------------------- |
+| Research  | GPT-4o            | OpenAI    | High reasoning for requirements          |
+| Wireframe | GPT-4o            | OpenAI    | Architecture design                      |
+| Code      | Gemini 1.5 Pro    | Google    | 1M token context for full file awareness |
+| QA        | GPT-4o            | OpenAI    | Code review reasoning                    |
+| Pedagogy  | Claude 3.5 Sonnet | Anthropic | Socratic mentoring style                 |
+| Roadmap   | Claude 3.5 Sonnet | Anthropic | Curriculum design                        |
 
 ```python
 # Actual routing logic in llm.py
@@ -253,6 +262,7 @@ Use **semantic Tailwind tokens** for theme adaptivity (light/dark mode):
 ```
 
 **Agent Signal Colors** (use for UI feedback):
+
 - Research Agent: `text-amber-400` / `border-amber-400/20`
 - Wireframe Agent: `text-blue-400` / `border-blue-400/20`
 - Code Agent: `text-emerald-400` / `border-emerald-400/20`
@@ -300,6 +310,7 @@ docker-compose up --build  # Redis + FastAPI + Celery + Flower
 ```
 
 **Deployment**:
+
 - Frontend → Vercel (auto-deploy on push to `main`)
 - Backend → Railway/Render (containerized FastAPI + Celery worker)
 - Database → Supabase (managed PostgreSQL)

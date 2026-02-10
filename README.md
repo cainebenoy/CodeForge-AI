@@ -79,6 +79,7 @@ docker-compose up --build
 ### Option B: Manual Setup
 
 1. **Frontend Setup**
+
    ```bash
    cd web
    pnpm install
@@ -86,9 +87,11 @@ docker-compose up --build
    # Edit .env.local with your Supabase credentials
    pnpm dev
    ```
+
    Frontend runs on `http://localhost:3000`
 
 2. **Backend Setup**
+
    ```bash
    cd backend
    pip install -r requirements.txt
@@ -96,9 +99,11 @@ docker-compose up --build
    # Edit .env with your API keys
    uvicorn app.main:app --reload
    ```
+
    Backend runs on `http://localhost:8000`
 
 3. **Celery Worker** (separate terminal)
+
    ```bash
    cd backend
    celery -A app.workers.celery_app worker --loglevel=info
@@ -114,6 +119,7 @@ docker-compose up --build
 ## Environment Variables
 
 ### Frontend (.env.local)
+
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -121,6 +127,7 @@ NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 ```
 
 ### Backend (.env)
+
 ```env
 # Supabase
 SUPABASE_URL=your_supabase_url
@@ -171,14 +178,14 @@ celery -A app.workers.celery_app flower --port=5555
 
 ## AI Agents
 
-| Agent | Model | Purpose |
-|---|---|---|
-| Research | GPT-4o | Requirements spec from one-liner ideas |
-| Wireframe | GPT-4o | Architecture spec (sitemap, components, state) |
-| Code | Gemini 1.5 Pro | Production code generation (1M token context) |
-| QA | GPT-4o | Code review with severity scoring |
-| Pedagogy | Claude 3.5 Sonnet | Socratic mentoring with choice frameworks |
-| Roadmap | Claude 3.5 Sonnet | Personalized learning curriculum |
+| Agent     | Model             | Purpose                                        |
+| --------- | ----------------- | ---------------------------------------------- |
+| Research  | GPT-4o            | Requirements spec from one-liner ideas         |
+| Wireframe | GPT-4o            | Architecture spec (sitemap, components, state) |
+| Code      | Gemini 1.5 Pro    | Production code generation (1M token context)  |
+| QA        | GPT-4o            | Code review with severity scoring              |
+| Pedagogy  | Claude 3.5 Sonnet | Socratic mentoring with choice frameworks      |
+| Roadmap   | Claude 3.5 Sonnet | Personalized learning curriculum               |
 
 ## Deployment
 

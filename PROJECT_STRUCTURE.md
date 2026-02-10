@@ -173,11 +173,13 @@ CodeForge AI/
 ## Key Architectural Decisions
 
 ### Monorepo Structure
+
 - `/web` — Next.js frontend (TypeScript)
 - `/backend` — FastAPI backend (Python)
 - `/database` — Supabase migrations (SQL)
 
 ### Security by Design
+
 - RLS on all database tables
 - Pydantic v2 strict validation on all inputs
 - CSRF double-submit cookie protection
@@ -186,12 +188,14 @@ CodeForge AI/
 - Secrets validated at startup from environment variables
 
 ### Task Execution
+
 - **Celery + Redis** for persistent background task queue
 - **`task_acks_late`** ensures no task loss on worker crashes
 - **BackgroundTasks** fallback if Celery unavailable
 - **Flower** dashboard for monitoring at `:5555`
 
 ### LLM Architecture
+
 - **Model Router**: 3 providers (OpenAI, Google, Anthropic) × 6 agents
 - **Circuit Breaker**: Prevents cascade failures on LLM outages
 - **LangChain LCEL**: `prompt | llm | PydanticOutputParser` chains
@@ -199,11 +203,13 @@ CodeForge AI/
 - **RAG with pgvector**: Pattern matching from previous projects
 
 ### State Management (Frontend)
+
 - **Server State**: React Query (TanStack Query)
 - **Local UI State**: Zustand
 - **Shareable State**: URL parameters
 
 ### Data Flow
+
 ```
 User → Next.js → Supabase (CRUD)
 User → Next.js → FastAPI → Celery → LLM → Supabase (Agent tasks)
@@ -227,29 +233,34 @@ cd backend && celery -A app.workers.celery_app worker --loglevel=info          #
 ## Technology Stack
 
 **Frontend**
+
 - Next.js 14 (App Router), TypeScript (Strict mode)
 - Tailwind CSS + Shadcn/UI
 - React Query + Zustand
 - Monaco Editor
 
 **Backend**
+
 - Python 3.11+, FastAPI
 - LangChain + LangGraph
 - Pydantic v2 (strict validation, 717 lines of schemas)
 - Celery + Redis (persistent task queue)
 
 **Database**
+
 - Supabase (PostgreSQL) with 7 migrations
 - pgvector (RAG embeddings)
 - Row Level Security (RLS)
 - Supabase Realtime (agent_jobs + projects)
 
 **AI Models**
+
 - OpenAI GPT-4o (Research, Wireframe, QA)
 - Google Gemini 1.5 Pro (Code generation)
 - Anthropic Claude 3.5 Sonnet (Pedagogy, Roadmap)
 
 **Infrastructure**
+
 - Docker Compose (Redis, FastAPI, Celery, Flower)
 - Vercel (Frontend), Railway/Render (Backend)
 - 297 tests across 16 test files

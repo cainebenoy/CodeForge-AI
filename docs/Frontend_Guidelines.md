@@ -46,14 +46,14 @@ We follow a **Feature-First** architecture combined with atomic design principle
 ### 3.1 Server vs. Client Components
 
 - **Server Components:**
-    - Fetching Project Data from Supabase.
-    - Rendering static markdown content (Spec Docs).
-    - Layout shells (Sidebars, Navbars).
+  - Fetching Project Data from Supabase.
+  - Rendering static markdown content (Spec Docs).
+  - Layout shells (Sidebars, Navbars).
 - **Client Components:**
-    - The Code Editor (Monaco).
-    - Chat Input forms.
-    - The "Choice Framework" Card selection (requires interactivity).
-    - Any component using `useState`, `useEffect`, or `useStore`.
+  - The Code Editor (Monaco).
+  - Chat Input forms.
+  - The "Choice Framework" Card selection (requires interactivity).
+  - Any component using `useState`, `useEffect`, or `useStore`.
 
 ### 3.2 Component Naming Convention
 
@@ -86,46 +86,46 @@ We use **Semantic CSS Variables** (via Shadcn/Tailwind) to support two distinct 
 
 **Semantic Token Mapping:**
 
-| Token | Light Mode (Value) | Dark Mode (Value) | Usage |
-| --- | --- | --- | --- |
-| `bg-background` | `white` | `zinc-950` | Main canvas background. |
-| `bg-muted` | `zinc-100` | `zinc-900` | Secondary backgrounds, sidebars, card surfaces. |
-| `border-border` | `zinc-200` | `zinc-800` | Structural dividers. |
-| `text-foreground` | `zinc-900` | `zinc-50` | Primary text. |
-| `text-muted-foreground` | `zinc-500` | `zinc-400` | Secondary text, metadata. |
+| Token                   | Light Mode (Value) | Dark Mode (Value) | Usage                                           |
+| ----------------------- | ------------------ | ----------------- | ----------------------------------------------- |
+| `bg-background`         | `white`            | `zinc-950`        | Main canvas background.                         |
+| `bg-muted`              | `zinc-100`         | `zinc-900`        | Secondary backgrounds, sidebars, card surfaces. |
+| `border-border`         | `zinc-200`         | `zinc-800`        | Structural dividers.                            |
+| `text-foreground`       | `zinc-900`         | `zinc-50`         | Primary text.                                   |
+| `text-muted-foreground` | `zinc-500`         | `zinc-400`        | Secondary text, metadata.                       |
 
-**Signal Colors (Agents):** *Adjust luminance for readability on light backgrounds.*
+**Signal Colors (Agents):** _Adjust luminance for readability on light backgrounds._
 
 - **Research Agent (Amber):**
-    - Dark: `text-amber-400` / `border-amber-400/20`
-    - Light: `text-amber-600` / `border-amber-600/20`
+  - Dark: `text-amber-400` / `border-amber-400/20`
+  - Light: `text-amber-600` / `border-amber-600/20`
 - **Wireframe Agent (Blue):**
-    - Dark: `text-blue-400` / `border-blue-400/20`
-    - Light: `text-blue-600` / `border-blue-600/20`
+  - Dark: `text-blue-400` / `border-blue-400/20`
+  - Light: `text-blue-600` / `border-blue-600/20`
 - **Code Agent (Emerald):**
-    - Dark: `text-emerald-400` / `border-emerald-400/20`
-    - Light: `text-emerald-600` / `border-emerald-600/20`
+  - Dark: `text-emerald-400` / `border-emerald-400/20`
+  - Light: `text-emerald-600` / `border-emerald-600/20`
 - **QA Agent (Teal):**
-    - Dark: `text-teal-400` / `border-teal-400/20`
-    - Light: `text-teal-600` / `border-teal-600/20`
+  - Dark: `text-teal-400` / `border-teal-400/20`
+  - Light: `text-teal-600` / `border-teal-600/20`
 - **Pedagogy Agent (Violet):**
-    - Dark: `text-violet-400` / `border-violet-400/20`
-    - Light: `text-violet-600` / `border-violet-600/20`
+  - Dark: `text-violet-400` / `border-violet-400/20`
+  - Light: `text-violet-600` / `border-violet-600/20`
 - **Roadmap Agent (Rose):**
-    - Dark: `text-rose-400` / `border-rose-400/20`
-    - Light: `text-rose-600` / `border-rose-600/20`
+  - Dark: `text-rose-400` / `border-rose-400/20`
+  - Light: `text-rose-600` / `border-rose-600/20`
 
 ### 4.2 Visual Hierarchy (Borders > Shadows)
 
 - **Definition:** Use **1px borders** to define hierarchy.
-    - *Dark:* `border-white/10` (Subtle)
-    - *Light:* `border-zinc-200` (Crisp)
+  - _Dark:_ `border-white/10` (Subtle)
+  - _Light:_ `border-zinc-200` (Crisp)
 - **Active States:** Use **"Glow Borders"** (Dark) or **"Ring Focus"** (Light) instead of size changes.
 - **Separators:** Use `divide-border` for lists to automatically adapt.
 
 ### 4.3 The "Glass" Layer (AI Overlays)
 
-We use Glassmorphism *sparingly* to distinguish the "AI Layer" from the "Application Layer."
+We use Glassmorphism _sparingly_ to distinguish the "AI Layer" from the "Application Layer."
 
 - **Usage:** Only for Floating Chat, Toasts, or the "Choice Framework" Cards.
 - **Class:** `bg-background/80 backdrop-blur-md border border-border`
@@ -135,7 +135,7 @@ We use Glassmorphism *sparingly* to distinguish the "AI Layer" from the "Applica
 
 - **Headings:** `Inter` or `Geist Sans`. Tight tracking (`tracking-tight`) for a technical feel.
 - **Badges/Status/Metadata:** **ALWAYS** use Monospace (`JetBrains Mono`).
-    - *Why?* It reinforces the engineering aesthetic. A status badge saying `[BUILDING]` looks more professional in mono.
+  - _Why?_ It reinforces the engineering aesthetic. A status badge saying `[BUILDING]` looks more professional in mono.
 
 ## 5. State Management Patterns
 
@@ -171,9 +171,9 @@ For shareable context, use `searchParams`.
 
 - **Wrapper:** Create a `CodeEditor` wrapper around `@monaco-editor/react`.
 - **Dynamic Theming:**
-    - Listen to `useTheme()` hook.
-    - If **Dark**: Load custom "CodeForge Dark" theme (based on VS Code Dark).
-    - If **Light**: Load custom "CodeForge Light" theme (based on GitHub Light).
+  - Listen to `useTheme()` hook.
+  - If **Dark**: Load custom "CodeForge Dark" theme (based on VS Code Dark).
+  - If **Light**: Load custom "CodeForge Light" theme (based on GitHub Light).
 - **Read-Only Mode:** During generation, lock the editor to "Read Only" so users don't conflict with the AI stream.
 - **Diff View:** When the user requests a change ("Refactor this"), use `MonacoDiffEditor` to show Before/After.
 
@@ -181,17 +181,17 @@ For shareable context, use `searchParams`.
 
 - **The "Typewriter" Effect:** Do not just dump text.
 - **Implementation:**
-    - The backend streams chunks.
-    - Frontend appends chunks to a buffer string.
-    - `react-markdown` renders the buffer.
+  - The backend streams chunks.
+  - Frontend appends chunks to a buffer string.
+  - `react-markdown` renders the buffer.
 - **Auto-Scroll:** Implementing a "Stick to Bottom" hook for the chat window that disables if the user manually scrolls up.
 
 ### 6.3 The Student Sandbox (Sandpack)
 
 - **Configuration:**
-    - Use `SandpackProvider` with a custom `template="react"`.
-    - **Theming:** Pass the `theme` prop to Sandpack (supports `auto` to match system preference).
-    - **Files:** Inject the `generatedFiles` from the Zustand store into the Sandpack `files` prop.
+  - Use `SandpackProvider` with a custom `template="react"`.
+  - **Theming:** Pass the `theme` prop to Sandpack (supports `auto` to match system preference).
+  - **Files:** Inject the `generatedFiles` from the Zustand store into the Sandpack `files` prop.
 - **Security:** Sandpack runs in an iframe on a separate domain (codesandbox.io), keeping our main app secure.
 
 ## 7. Performance & Optimization
@@ -205,8 +205,8 @@ For shareable context, use `searchParams`.
 ### 7.2 Lazy Loading
 
 - Lazy load heavy client components:
-    - `const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })`
-    - `const Sandpack = dynamic(() => import('@codesandbox/sandpack-react'), { ssr: false })`
+  - `const MonacoEditor = dynamic(() => import('@monaco-editor/react'), { ssr: false })`
+  - `const Sandpack = dynamic(() => import('@codesandbox/sandpack-react'), { ssr: false })`
 
 ### 7.3 Image Optimization
 
