@@ -29,6 +29,8 @@ class JobStatusType(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    WAITING_FOR_INPUT = "waiting_for_input"
+    CANCELLED = "cancelled"
 
 
 class PriorityLevel(str, Enum):
@@ -124,7 +126,7 @@ class ProjectUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=3, max_length=200)
     description: Optional[str] = Field(None, max_length=1000)
     status: Optional[str] = Field(
-        None, pattern="^(planning|in-progress|completed|archived)$"
+        None, pattern="^(planning|in-progress|building|completed|archived)$"
     )
 
 

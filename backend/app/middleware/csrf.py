@@ -32,6 +32,19 @@ SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 EXEMPT_PATHS = {"/health", "/docs", "/redoc", "/openapi.json"}
 
 
+def _has_bearer_token(request: Request) -> bool:
+    """
+    Check if the request uses Bearer token authentication.
+
+    API clients using JWT Bearer tokens are not vulnerable to CSRF
+    (browser cannot forge Authorization headers), so we skip CSRF
+    validation for these requests. This allows programmatic API usage
+    without requiring CSRF tokens while maintaining browser protection.
+    """
+    auth_header = request.headers.get("Authorization", "")
+    return auth_header.startswith("Bearer ")
+
+
 async def csrf_middleware(request: Request, call_next):
     """
     CSRF double-submit cookie middleware.
@@ -39,11 +52,21 @@ async def csrf_middleware(request: Request, call_next):
     For state-changing methods, verifies that the X-CSRF-Token header
     matches the csrf_token cookie. Sets the cookie on every response
     if not already present.
+
+    Bypass: Requests with a Bearer authorization header are exempt
+    because cross-origin scripts cannot set Authorization headers.
     """
     # Skip safe methods and exempt paths
     if request.method in SAFE_METHODS or request.url.path in EXEMPT_PATHS:
         response = await call_next(request)
         _ensure_csrf_cookie(request, response)
+        return response
+
+    # Skip CSRF for Bearer-authenticated requests (API clients)
+    # Security rationale: Bearer tokens cannot be auto-attached by browsers,
+    # so CSRF attacks are not possible with this auth scheme.
+    if _has_bearer_token(request):
+        response = await call_next(request)
         return response
 
     # For state-changing methods, validate the CSRF token

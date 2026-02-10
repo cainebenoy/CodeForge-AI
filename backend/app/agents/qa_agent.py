@@ -8,6 +8,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.core.llm import get_optimal_model
+from app.agents.core.resilience import resilient_llm_call
 from app.agents.prompts import get_agent_prompt
 from app.core.logging import logger
 from app.schemas.protocol import QAResult
@@ -50,12 +51,14 @@ async def run_qa_agent(code: str, file_path: str) -> QAResult:
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "code": code,
             "file_path": file_path,
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="qa",
     )
 
     logger.info(

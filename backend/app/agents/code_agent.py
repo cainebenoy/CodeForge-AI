@@ -8,6 +8,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.core.llm import get_optimal_model
+from app.agents.core.resilience import resilient_llm_call
 from app.agents.prompts import get_agent_prompt
 from app.core.logging import logger
 from app.schemas.protocol import CodeGenerationResult, RefactorResult
@@ -78,13 +79,15 @@ async def run_code_agent(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "architecture": architecture,
             "file_path": file_path or "all files needed for the application",
             "rag_context": rag_context,
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="code",
     )
 
     logger.info(f"Code Agent completed: {len(result.files)} files generated")
@@ -140,14 +143,16 @@ async def run_refactor_agent(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "file_path": file_path,
             "full_file_content": full_file_content,
             "selected_code": selected_code,
             "instruction": instruction,
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="code",
     )
 
     logger.info(f"Refactor Agent completed for {file_path}")

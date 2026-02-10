@@ -8,6 +8,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.core.llm import get_optimal_model
+from app.agents.core.resilience import resilient_llm_call
 from app.agents.prompts import get_agent_prompt
 from app.core.logging import logger
 from app.schemas.protocol import LearningRoadmap
@@ -62,13 +63,15 @@ async def run_roadmap_agent(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "requirements_spec": requirements_spec,
             "skill_level": skill_level,
             "focus_areas": focus_areas or "all project-relevant topics",
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="roadmap",
     )
 
     logger.info(

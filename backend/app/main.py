@@ -171,7 +171,15 @@ async def health_check():
 @app.exception_handler(CodeForgeException)
 async def codeforge_exception_handler(request: Request, exc: CodeForgeException):
     """Handle CodeForge custom exceptions"""
-    logger.error(f"CodeForge exception: {exc.error_code} - {exc.message}")
+    # Log internal details for debugging (especially for ExternalServiceError)
+    internal_msg = getattr(exc, "_internal_message", None)
+    if internal_msg:
+        logger.error(
+            f"CodeForge exception: {exc.error_code} - {exc.message} "
+            f"(internal: {internal_msg})"
+        )
+    else:
+        logger.error(f"CodeForge exception: {exc.error_code} - {exc.message}")
     return JSONResponse(
         status_code=exc.status_code,
         content=exc.to_dict(),

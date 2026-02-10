@@ -8,6 +8,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.core.llm import get_optimal_model
+from app.agents.core.resilience import resilient_llm_call
 from app.agents.prompts import get_agent_prompt
 from app.core.logging import logger
 from app.schemas.protocol import ChoiceFramework, PedagogyResponse
@@ -53,12 +54,14 @@ async def run_pedagogy_agent(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "student_question": student_question,
             "student_code": student_code or "(no code provided)",
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="pedagogy",
     )
 
     logger.info(f"Pedagogy Agent completed: {len(result.steps)} learning steps")
@@ -109,13 +112,15 @@ async def run_choice_framework(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "decision_context": decision_context,
             "student_skill_level": student_skill_level,
             "project_context": project_context or "(no additional context)",
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="pedagogy",
     )
 
     logger.info(f"Choice Framework completed: {len(result.options)} options generated")

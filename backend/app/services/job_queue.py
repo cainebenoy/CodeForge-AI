@@ -8,6 +8,7 @@ Supports two backends:
 """
 
 import json
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -70,8 +71,12 @@ class Job:
 
     @property
     def is_complete(self) -> bool:
-        """Check if job is complete"""
-        return self.status in [JobStatusType.COMPLETED, JobStatusType.FAILED]
+        """Check if job is in a terminal state"""
+        return self.status in [
+            JobStatusType.COMPLETED,
+            JobStatusType.FAILED,
+            JobStatusType.CANCELLED,
+        ]
 
     @property
     def duration(self) -> Optional[float]:
@@ -108,7 +113,9 @@ class BaseJobStore(ABC):
     ) -> Optional[Job]: ...
 
     @abstractmethod
-    def get_project_jobs(self, project_id: str, limit: int = 50) -> List[Job]: ...
+    def get_project_jobs(
+        self, project_id: str, limit: int = 50, offset: int = 0
+    ) -> Dict[str, Any]: ...
 
     @abstractmethod
     def get_pending_jobs(self) -> List[Job]: ...
@@ -121,11 +128,14 @@ class InMemoryJobStore(BaseJobStore):
     """
     In-memory job store — development fallback.
     Data is lost on restart.
+    Thread-safe via threading.Lock for concurrent access from
+    BackgroundTasks / asyncio.to_thread.
     """
 
     def __init__(self):
         self._jobs: Dict[str, Job] = {}
         self._project_jobs: Dict[str, List[str]] = {}
+        self._lock = threading.Lock()
 
     def create_job(
         self,
@@ -142,15 +152,17 @@ class InMemoryJobStore(BaseJobStore):
             input_context=input_context,
             user_id=user_id,
         )
-        self._jobs[job_id] = job
-        if project_id not in self._project_jobs:
-            self._project_jobs[project_id] = []
-        self._project_jobs[project_id].append(job_id)
+        with self._lock:
+            self._jobs[job_id] = job
+            if project_id not in self._project_jobs:
+                self._project_jobs[project_id] = []
+            self._project_jobs[project_id].append(job_id)
         logger.info(f"[InMemory] Created job: {job_id} for project {project_id}")
         return job
 
     def get_job(self, job_id: str) -> Optional[Job]:
-        return self._jobs.get(job_id)
+        with self._lock:
+            return self._jobs.get(job_id)
 
     def update_job(
         self,
@@ -160,56 +172,76 @@ class InMemoryJobStore(BaseJobStore):
         result: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
     ) -> Optional[Job]:
-        job = self._jobs.get(job_id)
-        if not job:
-            return None
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return None
 
-        if status:
-            job.status = status
-            if status == JobStatusType.RUNNING and not job.started_at:
-                job.started_at = datetime.now(timezone.utc)
-            if job.is_complete:
+            if status:
+                job.status = status
+                if status == JobStatusType.RUNNING and not job.started_at:
+                    job.started_at = datetime.now(timezone.utc)
+                if job.is_complete:
+                    job.completed_at = datetime.now(timezone.utc)
+
+            if progress is not None:
+                job.progress = max(0.0, min(100.0, progress))
+
+            if result is not None:
+                job.result = result
+
+            if error:
+                job.error = error
+                job.status = JobStatusType.FAILED
                 job.completed_at = datetime.now(timezone.utc)
-
-        if progress is not None:
-            job.progress = max(0.0, min(100.0, progress))
-
-        if result is not None:
-            job.result = result
-
-        if error:
-            job.error = error
-            job.status = JobStatusType.FAILED
-            job.completed_at = datetime.now(timezone.utc)
 
         logger.info(
             f"[InMemory] Updated job {job_id}: status={job.status.value}, progress={job.progress}"
         )
         return job
 
-    def get_project_jobs(self, project_id: str, limit: int = 50) -> List[Job]:
-        job_ids = self._project_jobs.get(project_id, [])
-        jobs = [self._jobs[jid] for jid in job_ids[-limit:] if jid in self._jobs]
-        return sorted(jobs, key=lambda j: j.created_at, reverse=True)
+    def get_project_jobs(
+        self, project_id: str, limit: int = 50, offset: int = 0
+    ) -> Dict[str, Any]:
+        with self._lock:
+            job_ids = self._project_jobs.get(project_id, [])
+            total = len(job_ids)
+            # Slice with offset/limit (ids are in insertion order)
+            sliced = (
+                job_ids[-(offset + limit) : len(job_ids) - offset]
+                if offset
+                else job_ids[-limit:]
+            )
+            jobs = [self._jobs[jid] for jid in sliced if jid in self._jobs]
+        jobs_sorted = sorted(jobs, key=lambda j: j.created_at, reverse=True)
+        return {
+            "items": jobs_sorted,
+            "total": total,
+            "has_more": (offset + limit) < total,
+        }
 
     def get_pending_jobs(self) -> List[Job]:
-        return [j for j in self._jobs.values() if j.status == JobStatusType.QUEUED]
+        with self._lock:
+            return [j for j in self._jobs.values() if j.status == JobStatusType.QUEUED]
 
     def cleanup_old_jobs(self, hours: int = 24) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-        to_remove = [
-            job_id
-            for job_id, job in self._jobs.items()
-            if job.is_complete
-            and job.completed_at is not None
-            and job.completed_at < cutoff
-        ]
-        for job_id in to_remove:
-            job = self._jobs.pop(job_id)
-            if job.project_id in self._project_jobs:
-                self._project_jobs[job.project_id] = [
-                    jid for jid in self._project_jobs[job.project_id] if jid != job_id
-                ]
+        with self._lock:
+            to_remove = [
+                job_id
+                for job_id, job in self._jobs.items()
+                if job.is_complete
+                and job.completed_at is not None
+                and job.completed_at < cutoff
+            ]
+            for job_id in to_remove:
+                job = self._jobs.pop(job_id)
+                if job.project_id in self._project_jobs:
+                    self._project_jobs[job.project_id] = [
+                        jid
+                        for jid in self._project_jobs[job.project_id]
+                        if jid != job_id
+                    ]
         logger.info(f"[InMemory] Cleaned up {len(to_remove)} old jobs")
         return len(to_remove)
 
@@ -311,8 +343,13 @@ class RedisJobStore(BaseJobStore):
         )
         return job
 
-    def get_project_jobs(self, project_id: str, limit: int = 50) -> List[Job]:
-        job_ids = self._redis.zrevrange(f"project_jobs:{project_id}", 0, limit - 1)
+    def get_project_jobs(
+        self, project_id: str, limit: int = 50, offset: int = 0
+    ) -> Dict[str, Any]:
+        total = self._redis.zcard(f"project_jobs:{project_id}")
+        job_ids = self._redis.zrevrange(
+            f"project_jobs:{project_id}", offset, offset + limit - 1
+        )
         jobs = []
         if job_ids:
             pipe = self._redis.pipeline()
@@ -322,7 +359,11 @@ class RedisJobStore(BaseJobStore):
             for data in results:
                 if data:
                     jobs.append(Job.deserialize(data))
-        return jobs
+        return {
+            "items": jobs,
+            "total": total,
+            "has_more": (offset + limit) < total,
+        }
 
     def get_pending_jobs(self) -> List[Job]:
         job_ids = self._redis.smembers("pending_jobs")

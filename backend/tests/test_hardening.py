@@ -195,12 +195,14 @@ class TestDbExecute:
 
     @pytest.mark.asyncio
     async def test_propagates_exceptions(self):
+        from app.core.exceptions import ExternalServiceError
         from app.services.database import _db_execute
 
         def bad_fn():
             raise ValueError("oops")
 
-        with pytest.raises(ValueError, match="oops"):
+        # _db_execute now categorizes generic errors as ExternalServiceError
+        with pytest.raises(ExternalServiceError):
             await _db_execute(bad_fn)
 
     @pytest.mark.asyncio

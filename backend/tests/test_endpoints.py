@@ -127,7 +127,7 @@ def test_list_project_jobs(
         )
     assert response.status_code == 200
     data = response.json()
-    assert data["count"] == 3
+    assert data["total"] == 3
 
 
 def test_validation_error_response_format(client, auth_headers):
@@ -409,10 +409,10 @@ def test_respond_to_clarification_success(
         agent_type="research",
         input_context={"user_idea": "A CRM app"},
     )
-    # Set up as a clarification job
+    # Set up as a clarification job (WAITING_FOR_INPUT status)
     fresh_job_store.update_job(
         "550e8400-e29b-41d4-a716-446655440001",
-        status=JobStatusType.COMPLETED,
+        status=JobStatusType.WAITING_FOR_INPUT,
         result={
             "is_complete": False,
             "questions": [

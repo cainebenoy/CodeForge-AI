@@ -131,7 +131,8 @@ class TestInMemoryJobStore:
             )
 
         jobs = fresh_job_store.get_project_jobs(project_id)
-        assert len(jobs) == 3
+        assert jobs["total"] == 3
+        assert len(jobs["items"]) == 3
 
     def test_get_project_jobs_limit(self, fresh_job_store):
         """Test that the limit parameter caps returned jobs"""
@@ -145,7 +146,9 @@ class TestInMemoryJobStore:
             )
 
         jobs = fresh_job_store.get_project_jobs(project_id, limit=3)
-        assert len(jobs) == 3
+        assert len(jobs["items"]) == 3
+        assert jobs["total"] == 10
+        assert jobs["has_more"] is True
 
     def test_get_pending_jobs(self, fresh_job_store):
         """Test getting only pending jobs"""

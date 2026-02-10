@@ -83,7 +83,7 @@ async def run_agent(
         # Sanitize context
         sanitized_context = InputValidator.sanitize_dict(request.input_context)
 
-        # Create job
+        # Create job in memory/Redis store (fast polling)
         job = job_store.create_job(
             job_id=job_id,
             project_id=request.project_id,
@@ -92,19 +92,54 @@ async def run_agent(
             user_id=user.id,
         )
 
-        logger.info(
-            f"Created agent job: {job_id} (type={request.agent_type}, "
-            f"project={request.project_id})"
-        )
-
-        # Add background task to execute agent
-        # In production, use Celery, RQ, or dedicated job queue
-        if background_tasks:
-            background_tasks.add_task(
-                execute_agent_background,
+        # Persist to DB for Supabase Realtime (best-effort)
+        try:
+            await DatabaseOperations.create_agent_job(
                 job_id=job_id,
-                request=request,
+                project_id=request.project_id,
+                user_id=user.id,
+                agent_type=request.agent_type.value
+                if hasattr(request.agent_type, "value")
+                else request.agent_type,
             )
+        except Exception as db_err:
+            logger.warning(f"Could not persist job to DB: {db_err}")
+
+        # Dispatch agent execution.
+        # Use Celery when available (persistent, survives restarts, cancellable).
+        # Fall back to FastAPI BackgroundTasks for dev without Redis/Celery.
+        dispatched_via = "background_task"
+        try:
+            from app.workers.tasks import execute_single_agent_task
+
+            celery_result = execute_single_agent_task.delay(
+                job_id=job_id,
+                project_id=request.project_id,
+                agent_type=request.agent_type.value
+                if hasattr(request.agent_type, "value")
+                else request.agent_type,
+                input_context=sanitized_context,
+                user_id=user.id,
+            )
+            # Store Celery task ID in job for cancel/monitoring
+            job_store.update_job(
+                job_id,
+                result={"_celery_task_id": celery_result.id},
+            )
+            dispatched_via = "celery"
+        except Exception as celery_err:
+            logger.warning(
+                f"Celery dispatch failed ({celery_err}), "
+                "falling back to BackgroundTasks"
+            )
+            if background_tasks:
+                background_tasks.add_task(
+                    execute_agent_background,
+                    job_id=job_id,
+                    request=request,
+                )
+
+        logger.info(f"Dispatched agent job {job_id} via {dispatched_via}")
 
         # Estimate time based on agent type
         time_estimates = {
@@ -165,17 +200,47 @@ async def run_pipeline(
             user_id=user.id,
         )
 
+        # Persist to DB for Supabase Realtime
+        try:
+            await DatabaseOperations.create_agent_job(
+                job_id=job_id,
+                project_id=request.project_id,
+                user_id=user.id,
+                agent_type="builder",
+            )
+        except Exception as db_err:
+            logger.warning(f"Could not persist pipeline job to DB: {db_err}")
+
         logger.info(
             f"Created builder pipeline job: {job_id} (project={request.project_id})"
         )
 
-        if background_tasks:
-            background_tasks.add_task(
-                execute_pipeline_background,
+        # Dispatch via Celery (preferred) or BackgroundTasks (fallback)
+        try:
+            from app.workers.tasks import execute_pipeline_task
+
+            celery_result = execute_pipeline_task.delay(
                 job_id=job_id,
                 project_id=request.project_id,
                 input_context=sanitized_context,
+                user_id=user.id,
             )
+            job_store.update_job(
+                job_id,
+                result={"_celery_task_id": celery_result.id},
+            )
+        except Exception as celery_err:
+            logger.warning(
+                f"Celery dispatch failed ({celery_err}), "
+                "falling back to BackgroundTasks"
+            )
+            if background_tasks:
+                background_tasks.add_task(
+                    execute_pipeline_background,
+                    job_id=job_id,
+                    project_id=request.project_id,
+                    input_context=sanitized_context,
+                )
 
         return AgentResponse(
             job_id=job_id,
@@ -195,6 +260,7 @@ async def execute_pipeline_background(
     try:
         logger.info(f"Starting builder pipeline for job {job_id}")
         job_store.update_job(job_id, status=JobStatusType.RUNNING, progress=5)
+        await _sync_job_to_db(job_id, status="running", progress=5)
 
         from app.agents.orchestrator import run_builder_pipeline
 
@@ -210,11 +276,13 @@ async def execute_pipeline_background(
             progress=100,
             result=result,
         )
+        await _sync_job_to_db(job_id, status="completed", progress=100, result=result)
         logger.info(f"Completed builder pipeline job {job_id}")
 
     except Exception as e:
         logger.error(f"Builder pipeline failed: {job_id} - {str(e)}")
         job_store.update_job(job_id, error=str(e), progress=0)
+        await _sync_job_to_db(job_id, status="failed", error=str(e))
 
 
 @router.get("/jobs/{job_id}", response_model=JobStatus)
@@ -270,19 +338,23 @@ async def get_job_status(
 @router.get("/jobs/{project_id}/list")
 async def list_project_jobs(
     project_id: str,
-    limit: int = 50,
+    page: int = 1,
+    page_size: int = 20,
     user: CurrentUser = Depends(get_current_user),
 ):
     """
-    List all jobs for a project
+    List all jobs for a project with pagination.
 
     Query parameters:
-    - limit: Maximum number of jobs to return (max 100)
+    - page: Page number (default 1)
+    - page_size: Items per page (default 20, max 100)
 
-    Returns: List of jobs sorted by creation date (newest first)
+    Returns: Paginated list of jobs sorted by creation date (newest first)
     """
-    if limit > 100:
-        raise ValidationError("limit", "Maximum limit is 100")
+    if page_size > 100:
+        raise ValidationError("page_size", "Maximum page_size is 100")
+    if page < 1:
+        raise ValidationError("page", "Page must be >= 1")
 
     InputValidator.validate_uuid(project_id)
 
@@ -291,13 +363,38 @@ async def list_project_jobs(
 
     await DatabaseOperations.get_project(project_id, user_id=user.id)
 
-    jobs = job_store.get_project_jobs(project_id, limit=limit)
+    offset = (page - 1) * page_size
+    result = job_store.get_project_jobs(project_id, limit=page_size, offset=offset)
 
     return {
         "project_id": project_id,
-        "count": len(jobs),
-        "jobs": [job.to_dict() for job in jobs],
+        "page": page,
+        "page_size": page_size,
+        "total": result["total"],
+        "has_more": result["has_more"],
+        "jobs": [job.to_dict() for job in result["items"]],
     }
+
+
+async def _sync_job_to_db(
+    job_id: str,
+    status: Optional[str] = None,
+    progress: Optional[float] = None,
+    result: Optional[dict] = None,
+    error: Optional[str] = None,
+) -> None:
+    """
+    Best-effort sync of job status to the persistent agent_jobs table.
+    This triggers Supabase Realtime notifications to connected frontends.
+    Failures are logged but never propagated — the in-memory/Redis store
+    remains the primary source during execution.
+    """
+    try:
+        await DatabaseOperations.update_agent_job(
+            job_id, status=status, progress=progress, result=result, error=error
+        )
+    except Exception as e:
+        logger.warning(f"Could not sync job {job_id} to DB: {e}")
 
 
 async def execute_agent_background(job_id: str, request: AgentRequest):
@@ -313,8 +410,9 @@ async def execute_agent_background(job_id: str, request: AgentRequest):
     try:
         logger.info(f"Starting background execution for job {job_id}")
 
-        # Update status to running
+        # Update status to running — both in-memory store and persistent DB
         job_store.update_job(job_id, status=JobStatusType.RUNNING, progress=10)
+        await _sync_job_to_db(job_id, status="running", progress=10)
 
         # Research agent: check if we should run clarification first
         if request.agent_type == "research":
@@ -345,6 +443,9 @@ async def execute_agent_background(job_id: str, request: AgentRequest):
                     progress=100,
                     result=result,
                 )
+                await _sync_job_to_db(
+                    job_id, status="completed", progress=100, result=result
+                )
                 logger.info(f"Completed research job {job_id} (with clarifications)")
                 return
 
@@ -373,13 +474,22 @@ async def execute_agent_background(job_id: str, request: AgentRequest):
 
                     job_store.update_job(
                         job_id,
-                        status=JobStatusType.COMPLETED,
-                        progress=100,
+                        status=JobStatusType.WAITING_FOR_INPUT,
+                        progress=50,
                         result={
                             "is_complete": False,
                             "questions": clarify_result.model_dump()["questions"],
                             "message": "Please answer the clarifying questions and "
                             "submit via POST /v1/agents/jobs/{job_id}/respond",
+                        },
+                    )
+                    await _sync_job_to_db(
+                        job_id,
+                        status="waiting_for_input",
+                        progress=50,
+                        result={
+                            "is_complete": False,
+                            "questions": clarify_result.model_dump()["questions"],
                         },
                     )
                     logger.info(
@@ -408,12 +518,14 @@ async def execute_agent_background(job_id: str, request: AgentRequest):
             progress=100,
             result=result,
         )
+        await _sync_job_to_db(job_id, status="completed", progress=100, result=result)
 
         logger.info(f"Completed job {job_id}")
 
     except Exception as e:
         logger.error(f"Agent job failed: {job_id} - {str(e)}")
         job_store.update_job(job_id, error=str(e), progress=0)
+        await _sync_job_to_db(job_id, status="failed", error=str(e))
 
 
 @router.post("/jobs/{job_id}/respond")
@@ -447,7 +559,11 @@ async def respond_to_clarification(
         raise ResourceNotFoundError("Job", job_id)
 
     # Verify job has clarification data
-    if not job.result or job.result.get("is_complete") is not False:
+    if (
+        not job.result
+        or job.result.get("is_complete") is not False
+        or job.status != JobStatusType.WAITING_FOR_INPUT
+    ):
         raise ValidationError(
             "job_id",
             "This job does not have pending clarification questions",
@@ -504,6 +620,64 @@ async def respond_to_clarification(
         status=JobStatusType.QUEUED,
         estimated_time="2-3 minutes",
     )
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    user: CurrentUser = Depends(get_current_user),
+):
+    """
+    Cancel a running or queued agent job.
+
+    If the job is running via Celery, sends a revoke signal to terminate
+    the worker task. Updates job status to 'cancelled'.
+
+    Security:
+    - Auth required
+    - Job ownership verified
+    - Only non-terminal jobs can be cancelled
+    """
+    InputValidator.validate_uuid(job_id)
+
+    job = job_store.get_job(job_id)
+    if not job:
+        raise ResourceNotFoundError("Job", job_id)
+
+    # Authorization: verify the requesting user owns this job
+    if job.user_id and job.user_id != user.id:
+        from app.core.exceptions import PermissionError
+
+        raise PermissionError("You do not have access to this job")
+
+    # Can only cancel non-terminal jobs
+    if job.is_complete:
+        raise ValidationError(
+            "job_id",
+            f"Cannot cancel job in '{job.status.value}' state",
+        )
+
+    # Attempt Celery revocation if a celery_task_id is stored
+    celery_task_id = (job.result or {}).get("_celery_task_id")
+    if celery_task_id:
+        try:
+            from app.workers.celery_app import celery_app
+
+            celery_app.control.revoke(celery_task_id, terminate=True, signal="SIGTERM")
+            logger.info(f"Revoked Celery task {celery_task_id} for job {job_id}")
+        except Exception as e:
+            logger.warning(f"Could not revoke Celery task: {e}")
+
+    # Update job status
+    job_store.update_job(
+        job_id,
+        status=JobStatusType.CANCELLED,
+        progress=job.progress,
+    )
+
+    logger.info(f"Cancelled job {job_id}")
+
+    return {"job_id": job_id, "status": "cancelled", "message": "Job cancelled"}
 
 
 # ──────────────────────────────────────────────────────────────
@@ -598,6 +772,34 @@ async def stream_job_progress(
                     },
                 )
                 return
+
+            if current_job.status == JobStatusType.CANCELLED:
+                yield _sse_event(
+                    "cancelled",
+                    {
+                        "job_id": job_id,
+                        "status": "cancelled",
+                        "progress": current_job.progress,
+                    },
+                )
+                return
+
+            if current_job.status == JobStatusType.WAITING_FOR_INPUT:
+                yield _sse_event(
+                    "waiting",
+                    {
+                        "job_id": job_id,
+                        "status": "waiting_for_input",
+                        "progress": current_job.progress,
+                        "result": current_job.result,
+                    },
+                )
+                # Don't return — keep streaming, user may respond
+                if progress != last_progress:
+                    last_progress = progress
+                await asyncio.sleep(poll_interval)
+                elapsed += poll_interval
+                continue
 
             # Only emit if progress changed (avoid duplicate events)
             if progress != last_progress:

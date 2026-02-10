@@ -8,6 +8,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from app.agents.core.llm import get_optimal_model
+from app.agents.core.resilience import resilient_llm_call
 from app.agents.prompts import get_agent_prompt
 from app.core.logging import logger
 from app.schemas.protocol import ClarificationResponse, RequirementsDoc
@@ -74,13 +75,15 @@ async def run_research_agent(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "user_idea": user_idea,
             "target_audience": target_audience or "General users",
             "rag_context": rag_context,
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="research",
     )
 
     logger.info(f"Research Agent completed: {result.app_name}")
@@ -126,12 +129,14 @@ async def run_research_clarification(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "user_idea": user_idea,
             "target_audience": target_audience or "General users",
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="research",
     )
 
     logger.info(f"Research Clarification completed: {len(result.questions)} questions")
@@ -195,13 +200,15 @@ async def run_research_with_context(
 
     chain = prompt | llm | parser
 
-    result = await chain.ainvoke(
+    result = await resilient_llm_call(
+        chain.ainvoke,
         {
             "user_idea": user_idea,
             "target_audience": target_audience or "General users",
             "clarifications": clarification_text or "(none provided)",
             "format_instructions": parser.get_format_instructions(),
-        }
+        },
+        agent_type="research",
     )
 
     logger.info(f"Research Agent with context completed: {result.app_name}")

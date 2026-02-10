@@ -2,6 +2,7 @@
 Custom exceptions for the application
 Provides comprehensive error handling with proper HTTP status codes
 """
+
 from typing import Any, Dict, Optional
 
 
@@ -89,15 +90,22 @@ class RateLimitExceededError(CodeForgeException):
 
 
 class ExternalServiceError(CodeForgeException):
-    """External service error (502/503)"""
+    """External service error (502/503)
+
+    Security: The raw error message is logged server-side but only the
+    service name is exposed to the client to prevent information leakage.
+    """
 
     def __init__(self, service: str, message: str):
+        # Log full error detail server-side; expose only service name to client
         super().__init__(
-            message=f"{service} error: {message}",
+            message=f"{service} service error",
             status_code=503,
             error_code="EXTERNAL_SERVICE_ERROR",
             details={"service": service},
         )
+        # Store raw message for server-side logging (not in to_dict output)
+        self._internal_message = message
 
 
 class AgentExecutionError(CodeForgeException):

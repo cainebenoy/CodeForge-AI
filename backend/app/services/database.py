@@ -21,12 +21,43 @@ from app.services.supabase import supabase_client
 T = TypeVar("T")
 
 
-async def _db_execute(fn: Callable[[], T]) -> T:
+async def _db_execute(fn: Callable[[], T], *, operation: str = "database") -> T:
     """
     Run a **synchronous** supabase-py call in a background thread so the
     event loop is never blocked.  Every database method below uses this.
+
+    Error handling:
+    - Categorizes exceptions into appropriate CodeForge error types
+    - Logs error details server-side for debugging
+    - Prevents raw Supabase errors from leaking to API responses
+
+    Args:
+        fn: Synchronous callable to execute in a thread
+        operation: Description of the operation for log context
     """
-    return await asyncio.to_thread(fn)
+    try:
+        return await asyncio.to_thread(fn)
+    except (ResourceNotFoundError, PermissionError, ValidationError):
+        # Re-raise already-categorized CodeForge exceptions
+        raise
+    except Exception as e:
+        error_str = str(e)
+
+        # Categorize common Supabase/PostgREST errors
+        if "No rows" in error_str or "0 rows" in error_str:
+            raise ResourceNotFoundError("Resource", "unknown")
+        elif "duplicate key" in error_str or "unique constraint" in error_str:
+            raise ValidationError(
+                "data", "A record with this identifier already exists"
+            )
+        elif "violates check constraint" in error_str:
+            raise ValidationError("data", "Value does not meet validation rules")
+        elif "violates foreign key" in error_str:
+            raise ValidationError("data", "Referenced record does not exist")
+
+        # Log full error server-side; return sanitized message to client
+        logger.error(f"Database error during {operation}: {error_str}")
+        raise ExternalServiceError("Database", f"Operation '{operation}' failed")
 
 
 class DatabaseOperations:
@@ -611,11 +642,7 @@ class DatabaseOperations:
                 data["skill_level"] = skill_level
 
             response = await _db_execute(
-                lambda: (
-                    supabase_client.table("profiles")
-                    .upsert(data)
-                    .execute()
-                )
+                lambda: supabase_client.table("profiles").upsert(data).execute()
             )
 
             if response.data:
@@ -628,9 +655,7 @@ class DatabaseOperations:
             raise ExternalServiceError("Supabase", str(e))
 
     @staticmethod
-    async def update_profile(
-        user_id: str, data: Dict[str, Any]
-    ) -> Dict[str, Any]:
+    async def update_profile(user_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Update a user's profile. Only allows known fields.
         Raises ResourceNotFoundError if profile doesn't exist.
@@ -721,4 +746,169 @@ class DatabaseOperations:
             return response.data or []
         except Exception as e:
             logger.error(f"Error listing sessions: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    # ──────────────────────────────────────────────────────────
+    # Agent Jobs operations (persistent job tracking + Realtime)
+    # ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    async def create_agent_job(
+        job_id: str,
+        project_id: str,
+        user_id: str,
+        agent_type: str,
+        celery_task_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Persist a new agent job to the agent_jobs table.
+        This enables Supabase Realtime notifications to connected frontends.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("agent_jobs")
+                    .insert(
+                        {
+                            "id": job_id,
+                            "project_id": project_id,
+                            "user_id": user_id,
+                            "agent_type": agent_type,
+                            "status": "queued",
+                            "progress": 0.0,
+                            "celery_task_id": celery_task_id,
+                        }
+                    )
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Persisted agent job: {job_id}")
+                return response.data[0]
+            raise ExternalServiceError("Supabase", "Failed to create agent job")
+        except Exception as e:
+            logger.error(f"Error creating agent job: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def update_agent_job(
+        job_id: str,
+        status: Optional[str] = None,
+        progress: Optional[float] = None,
+        result: Optional[Dict[str, Any]] = None,
+        error: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update an agent job's status/progress in the DB.
+        Triggers Supabase Realtime notification to connected frontends.
+        """
+        update_data: Dict[str, Any] = {}
+        if status is not None:
+            update_data["status"] = status
+        if progress is not None:
+            update_data["progress"] = progress
+        if result is not None:
+            update_data["result"] = result
+        if error is not None:
+            update_data["error"] = error
+
+        if not update_data:
+            raise ValidationError("data", "No valid fields to update")
+
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("agent_jobs")
+                    .update(update_data)
+                    .eq("id", job_id)
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.debug(f"Updated agent job: {job_id}")
+                return response.data[0]
+            raise ResourceNotFoundError("AgentJob", job_id)
+        except (ResourceNotFoundError, ValidationError):
+            raise
+        except Exception as e:
+            logger.error(f"Error updating agent job: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def get_agent_job(
+        job_id: str, user_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get a single agent job by ID.
+        Optional ownership check via user_id.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("agent_jobs")
+                    .select("*")
+                    .eq("id", job_id)
+                    .single()
+                    .execute()
+                )
+            )
+
+            if not response.data:
+                raise ResourceNotFoundError("AgentJob", job_id)
+
+            if user_id and response.data.get("user_id") != user_id:
+                raise PermissionError("You do not have access to this job")
+
+            return response.data
+        except (ResourceNotFoundError, PermissionError):
+            raise
+        except Exception as e:
+            if "No rows" in str(e) or "0 rows" in str(e):
+                raise ResourceNotFoundError("AgentJob", job_id)
+            logger.error(f"Error fetching agent job: {str(e)}")
+            raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def list_agent_jobs(
+        project_id: str,
+        user_id: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> Dict[str, Any]:
+        """
+        List agent jobs for a project with pagination and ownership check.
+        Returns dict with 'items', 'total', 'page', 'page_size', 'has_more'.
+        """
+        page_size = min(page_size, 100)
+        offset = (page - 1) * page_size
+
+        try:
+
+            def _query():
+                return (
+                    supabase_client.table("agent_jobs")
+                    .select("*", count="exact")
+                    .eq("project_id", project_id)
+                    .eq("user_id", user_id)
+                    .order("created_at", desc=True)
+                    .range(offset, offset + page_size - 1)
+                    .execute()
+                )
+
+            response = await _db_execute(_query)
+
+            total = response.count if response.count is not None else 0
+            items = response.data or []
+
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "has_more": (offset + page_size) < total,
+            }
+        except Exception as e:
+            logger.error(f"Error listing agent jobs: {str(e)}")
             raise ExternalServiceError("Supabase", str(e))
