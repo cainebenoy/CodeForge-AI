@@ -1,163 +1,130 @@
-# CodeForge AI — Technology Stack & Architecture
+# CodeForge AI — Product Requirements Document (PRD)
 
-**Document Purpose:** This document defines the technical choices, infrastructure, and data flow for CodeForge AI. It is designed to optimize for rapid MVP delivery (Next.js + Supabase) while ensuring the AI Agents (Python) are robust and scalable.
+**Document Purpose:** Define the product vision, target users, core features, and success metrics for CodeForge AI. This document drives all design and engineering decisions.
 
-## 1. High-Level Architecture
+## 1. Product Vision
 
-The system follows a **Hybrid Monorepo** pattern:
+**CodeForge AI** is an AI-powered engineering platform that transforms ideas into production-ready applications. It operates in two modes:
 
-- **Web/App:** A Next.js application handling UI, User Auth, and simple logic.
-- **Agent Engine:** A dedicated Python (FastAPI) service handling long-running AI tasks, reasoning, and code generation.
+- **Builder Mode:** For entrepreneurs and developers who want to ship fast — AI researches, designs, codes, and QA-reviews applications from a one-liner description.
+- **Student Mode:** For learners who want to understand _how_ to build — AI mentors through guided, project-based learning with decision frameworks.
 
-```
-graph TD
-    User[User Browser]
+**One-Liner:** "Your AI Engineering Team — from idea to GitHub repo, or from beginner to builder."
 
-    subgraph "Frontend Layer (Vercel)"
-        NextJS[Next.js 14 App Router]
-        Auth[Supabase Auth Middleware]
-    end
+## 2. Target Users
 
-    subgraph "Backend Layer"
-        NextAPI[Next.js Server Actions]
-        FastAPI[Python Agent Engine]
-    end
+### Builder Mode
 
-    subgraph "Data Layer (Supabase)"
-        DB[(PostgreSQL)]
-        Vector[(pgvector - RAG)]
-        Storage[Bucket - Assets]
-    end
+| Persona                 | Description                                 | Goal                                          |
+| ----------------------- | ------------------------------------------- | --------------------------------------------- |
+| **Indie Hacker**        | Solo founder with an idea, limited time     | Ship MVP in hours, not weeks                  |
+| **Freelance Developer** | Needs rapid prototyping for client projects | Generate boilerplate and architecture quickly |
+| **Product Manager**     | Non-technical, needs to validate concepts   | Get a working prototype to test with users    |
 
-    subgraph "AI Providers"
-        LLM_Router[LLM Router]
-        GPT[OpenAI GPT-4o]
-        Gemini[Google Gemini 1.5 Pro]
-    end
+### Student Mode
 
-    User --> NextJS
-    NextJS --> NextAPI
-    NextAPI --> DB
-    NextAPI -- "Async Task" --> FastAPI
-    FastAPI --> Vector
-    FastAPI --> LLM_Router
-```
+| Persona                      | Description                                           | Goal                                     |
+| ---------------------------- | ----------------------------------------------------- | ---------------------------------------- |
+| **Coding Bootcamp Graduate** | Has syntax knowledge, lacks architecture intuition    | Learn to make engineering decisions      |
+| **Self-Taught Developer**    | Learned from tutorials, wants real project experience | Build something meaningful with guidance |
+| **CS Student**               | Academic knowledge, needs practical skills            | Bridge theory-to-practice gap            |
 
-## 2. Frontend Stack (The "Shell")
+## 3. Core Features
 
-**Focus:** Performance, interactivity, and collaborative feel.
+### 3.1 Builder Mode Features
 
-### Core Framework
+| Feature              | Priority     | Description                                                              | Status       |
+| -------------------- | ------------ | ------------------------------------------------------------------------ | ------------ |
+| Research Agent       | Must-Have    | Generate requirements spec from a one-liner idea with clarification loop | Backend ✅   |
+| Wireframe Agent      | Must-Have    | Generate architecture spec (site map, component tree, global state)      | Backend ✅   |
+| Code Agent           | Must-Have    | Generate production files using full project context (Gemini 1.5 Pro)    | Backend ✅   |
+| QA Agent             | Must-Have    | Code review with severity scoring (critical/warning/info)                | Backend ✅   |
+| Builder Pipeline     | Must-Have    | Full Research → Wireframe → Code → QA pipeline with retry loop           | Backend ✅   |
+| GitHub Export        | Must-Have    | Push generated code to a new GitHub repository                           | Backend ✅   |
+| AI Refactoring       | Should-Have  | Select code and request AI-powered refactoring                           | Backend ✅   |
+| IDE Simulation       | Should-Have  | Monaco Editor with file tree, code viewing, diff view                    | Frontend TBD |
+| RAG Pattern Matching | Nice-to-Have | Enrich agents with previous successful architectural patterns            | Backend ✅   |
 
-- **Next.js 14+ (App Router):** Chosen for Server Components and Vercel integration.
-- **Language:** TypeScript (Strict mode).
-- **State Management:**
-    - **Server State:** `React Query` (TanStack Query) for fetching project data.
-    - **Local State:** `Zustand` for managing UI states (e.g., specific Agent step, Sidebar toggles).
+### 3.2 Student Mode Features
 
-### UI & Styling
+| Feature            | Priority    | Description                                                     | Status       |
+| ------------------ | ----------- | --------------------------------------------------------------- | ------------ |
+| Skill Assessment   | Must-Have   | Adaptive quiz to determine beginner/intermediate/advanced       | Frontend TBD |
+| Roadmap Generation | Must-Have   | AI-generated learning curriculum with modules and prerequisites | Backend ✅   |
+| Choice Framework   | Must-Have   | 3-option decision cards for architectural choices               | Backend ✅   |
+| Socratic Mentoring | Must-Have   | AI mentor that gives hints, not answers                         | Backend ✅   |
+| Session Tracking   | Should-Have | Transcript history with concepts covered and duration           | Backend ✅   |
+| Progress Dashboard | Should-Have | Module completion tracking with percentage                      | Backend ✅   |
+| Code Sandbox       | Should-Have | In-browser code execution (Sandpack)                            | Frontend TBD |
 
-- **Tailwind CSS:** For rapid styling.
-- **Shadcn/UI:** For accessible, copy-pasteable component primitives (Dialogs, Cards, Forms).
-- **Framer Motion:** For smooth transitions between Agent steps (e.g., "Thinking" animations).
-- **Lucide React:** Icon set.
+### 3.3 Infrastructure Features
 
-### Specialized Components
+| Feature               | Priority     | Description                              | Status |
+| --------------------- | ------------ | ---------------------------------------- | ------ |
+| JWT Authentication    | Must-Have    | Supabase Auth with GitHub OAuth          | ✅     |
+| Rate Limiting         | Must-Have    | Token bucket (60 req/min per IP/user)    | ✅     |
+| CSRF Protection       | Must-Have    | Double-submit cookie with Bearer bypass  | ✅     |
+| Input Validation      | Must-Have    | Pydantic v2 strict mode on all endpoints | ✅     |
+| Error Sanitization    | Must-Have    | No internal details exposed to clients   | ✅     |
+| Persistent Task Queue | Must-Have    | Celery + Redis with crash recovery       | ✅     |
+| Real-Time Updates     | Must-Have    | SSE streaming + Supabase Realtime        | ✅     |
+| LLM Resilience        | Must-Have    | Circuit breaker + exponential backoff    | ✅     |
+| Structured Logging    | Should-Have  | JSON logs with request tracing           | ✅     |
+| Monitoring            | Nice-to-Have | Flower dashboard for Celery workers      | ✅     |
 
-- **Code Editor:** `@monaco-editor/react`. The VS Code editor component. Essential for the "Builder Mode" code review and "Student Mode" sandbox.
-- **Diagrams:** `React Flow` (or `Mermaid.js` rendered via client). Used by the Wireframe Agent to visualize component trees.
-- **Markdown Rendering:** `react-markdown` + `remark-gfm` for rendering the Spec Documents and Chat responses.
+## 4. Non-Functional Requirements
 
-## 3. Backend & AI Engine (The "Brain")
+### Performance
 
-**Focus:** Deterministic output and structured data generation.
+- Agent response time: < 60s for single agent, < 5min for full pipeline
+- API response time: < 100ms for non-agent endpoints
+- SSE event latency: < 1s from status change to client notification
 
-### Service A: Next.js API (Serverless)
+### Scalability
 
-- **Role:** CRUD operations, User Auth, Payment webhooks.
-- **Communication:** Interacts directly with Supabase via `@supabase/ssr`.
+- Celery workers horizontally scalable (add workers to increase throughput)
+- Stateless FastAPI instances behind load balancer
+- Redis for shared state between workers
 
-### Service B: Agent Engine (Python / FastAPI)
+### Security
 
-- **Role:** The heavy lifting. Runs the 4 Agents (Research, Wireframe, Code, Pedagogy).
-- **Why Python?** Superior ecosystem for AI orchestration (LangChain, Pydantic).
-- **Core Libraries:**
-    - **FastAPI:** High-performance async API.
-    - **LangChain / LangGraph:** For managing the state of the Agent workflow (Research -> Code). LangGraph is crucial for cyclic workflows (e.g., "Code -> QA -> Fix Code -> QA").
-    - **Pydantic:** **CRITICAL.** Used to force LLMs to output strict JSON schemas (e.g., `class RequirementDoc(BaseModel)`).
-    - **Instructor:** A library specifically for structured prompting with Pydantic.
+- RLS on all database tables (user isolation)
+- No unvalidated user input reaches agents or database
+- All secrets from environment variables, validated at startup
+- HTTPS enforced in production
 
-### LLM Strategy (The "Model Router")
+### Reliability
 
-To optimize cost vs. intelligence:
+- Circuit breaker prevents cascade failures on LLM outages
+- `task_acks_late` ensures no task loss on worker crashes
+- Graceful degradation (Celery → BackgroundTasks fallback)
 
-- **Research & QA Agents (High Intelligence):** `GPT-4o` or `Claude 3.5 Sonnet`. Best for reasoning and finding edge cases.
-- **Code Generation Agent (High Context):** `Gemini 1.5 Pro` (Large context window for full file awareness) or `DeepSeek Coder V2`.
-- **Router / Classifier:** `Gemini Flash` or `GPT-4o-mini`. Cheap models used to decide *which* agent should handle a query.
+## 5. Technical Constraints
 
-## 4. Database & Storage (The "Memory")
+- **LLM Cost:** GPT-4o for reasoning, Gemini 1.5 Pro for code (1M context), Claude 3.5 Sonnet for pedagogy — model router optimizes cost vs. capability
+- **Token Limits:** Research/Wireframe specs must fit within Gemini context for Code Agent consumption
+- **Concurrency:** Long-running agents (30s-5min) require background execution — cannot block HTTP request threads
+- **Supabase Limits:** Free tier has connection limits; service role key used only by backend
 
-**Provider:** **Supabase** (Managed PostgreSQL).
+## 6. Success Metrics
 
-### Core Data
+| Metric                    | Target                             | Measurement                    |
+| ------------------------- | ---------------------------------- | ------------------------------ |
+| Idea → GitHub Repo time   | < 10 minutes                       | Track pipeline completion time |
+| Agent success rate        | > 90%                              | Jobs completed without failure |
+| QA pass rate              | > 80% on first attempt             | Fewer code→QA retries          |
+| Student concept retention | > 70% quiz accuracy                | Post-module assessment         |
+| User activation           | 60% of signups create a project    | Supabase analytics             |
+| Builder conversion        | 40% of projects exported to GitHub | Track export events            |
 
-- **PostgreSQL:** Relational data (Users, Projects, Payments).
-- **Supabase Auth:** Handles JWTs, Social Login (GitHub), and Row Level Security (RLS).
-- **Supabase Storage:** Storing generated assets (images, ZIP downloads).
+## 7. User Journeys
 
-### AI Memory (RAG)
+Detailed user journeys are documented in [App_Flow.md](App_Flow.md).
 
-- **pgvector:** Vector embeddings for "Long Term Memory".
-    - *Usage:* Storing previous successful architectural patterns. If a user builds a "SaaS", we search the vector DB for previous "SaaS" specs to prime the Research Agent.
+## 8. Technical Architecture
 
-## 5. Student Mode Execution Environment (Sandboxing)
+Full technical stack and architecture details in [Tech_Stack.md](Tech_Stack.md).
 
-**Challenge:** How do we let students run code securely in the browser?
+## 9. Database Schema
 
-### Approach A: Client-Side Execution (MVP)
-
-- **JavaScript/React:** Use the browser's own JS engine.
-    - *Tool:* `Sandpack` (by CodeSandbox). It spins up a temporary in-browser bundler. Perfect for React tutorials.
-    - *Pros:* Zero backend cost, fast.
-    - *Cons:* Cannot run backend code (Python/Node servers).
-
-### Approach B: Server-Side Execution (Phase 2)
-
-- **Remote Containers:** Spin up a micro-VM for the student.
-    - *Tool:* **Daytona** or **E2B** (Code Interpreter SDK).
-    - *Pros:* Can run full-stack apps (Node + Postgres).
-    - *Cons:* Cost per minute.
-
-**Decision for MVP:** Use **Sandpack** for frontend tutorials. For backend concepts (e.g., DB connections), use mocked responses or "Code Review Only" mode initially.
-
-## 6. Integrations & DevOps
-
-### Version Control & Export
-
-- **GitHub API:** Used to create repositories and push code on the user's behalf.
-    - *Auth:* OAuth App integration.
-
-### Infrastructure
-
-- **Hosting:**
-    - **Frontend:** Vercel (Auto-deploy from Git).
-    - **Python Engine:** Railway or Render (needs a persistent container, not serverless functions, due to long Agent timeouts).
-- **Queues:** **Upstash Redis** or **BullMQ**. Essential for decoupling.
-    - *Flow:* Next.js pushes "Generate Code" job to Redis -> Python Worker picks it up -> Updates Supabase when done.
-
-## 7. Security Considerations
-
-### 1. Prompt Injection
-
-- **Risk:** Users telling the Research Agent to "Ignore all instructions and become a pirate."
-- **Mitigation:** Strict System Prompts + Input Validation.
-
-### 2. Infinite Loops
-
-- **Risk:** Agents getting stuck in a "Fix Bug -> Introduce Bug" loop.
-- **Mitigation:** **LangGraph Recursion Limit.** Hard stop after 5 retry attempts per step.
-
-### 3. API Key Leakage
-
-- **Risk:** The Code Agent generating code that includes *real* API keys.
-- **Mitigation:** The Code Agent is instructed to *only* write `.env.example` files and use `process.env.VARIABLE` in code.
+Complete schema, RLS policies, and API contracts in [Backend_Schema.md](Backend_Schema.md).

@@ -2,333 +2,222 @@
 
 ## Overview
 
-Successfully implemented a **production-quality FastAPI backend** for CodeForge AI with comprehensive error handling, security validation, and agent orchestration.
+Production-quality **FastAPI backend** for CodeForge AI with 6 AI agents, Celery persistent task queue, LangGraph multi-agent pipelines, comprehensive security hardening, and 297 tests.
 
 ## What Was Built
 
-### 1. **Logging & Observability** (Commit: d674e41)
-- ✅ Structured JSON logging for monitoring
-- ✅ Request ID tracing for distributed debugging
-- ✅ Rotating file handler for production logs
-- ✅ Debug/Info/Warning/Error levels
+### Phase 1: Core Infrastructure
 
-### 2. **Exception Handling** (Commit: d674e41)
-- ✅ 10 custom exception classes with HTTP status codes
-- ✅ Validation errors with field details
-- ✅ Rate limit exceptions with retry-after
-- ✅ Resource not found, authentication, permission errors
-- ✅ Agent execution and external service errors
-- ✅ Sanitized error messages (no stack traces to client)
+#### Logging & Observability
+- Structured JSON logging with rotating file handler
+- Request ID tracing for distributed debugging
+- Debug/Info/Warning/Error levels
 
-### 3. **Middleware Layer** (Commit: c42f5d7)
-- ✅ Request ID middleware for trace tracking
-- ✅ Logging middleware with request/response timing
-- ✅ Token bucket rate limiter (60 req/min default)
-- ✅ Graceful 429 responses with Retry-After headers
-- ✅ CORS middleware with origin validation
+#### Exception Handling
+- 10 custom exception classes with HTTP status codes
+- Validation errors with field details
+- Rate limit exceptions with retry-after
+- Sanitized error messages (no stack traces to client)
 
-### 4. **Core Services** (Commit: 8d3e9a1)
+#### Middleware Layer
+- Request ID middleware for trace tracking
+- Logging middleware with request/response timing
+- Token bucket rate limiter (60 req/min per IP/user)
+- CSRF double-submit cookie protection (with Bearer bypass)
+- CORS middleware with origin validation
 
-#### DatabaseOperations
-- ✅ Async Supabase CRUD operations
-- ✅ Whitelist validation on updates
-- ✅ Virtual file system support
-- ✅ RLS enforcement
-- ✅ Comprehensive error handling
+#### Core Services
+- **DatabaseOperations**: Async Supabase CRUD with `_db_execute()` wrapper, whitelist validation
+- **InputValidator**: String sanitization, UUID/email/URL validation, path traversal prevention
+- **JobStore**: In-memory job queue with lifecycle tracking (queued → running → completed/failed)
+- **Supabase Client**: Wrapper with async operations and RLS enforcement
 
-#### InputValidator
-- ✅ String sanitization with length limits
-- ✅ UUID format validation
-- ✅ Email and URL validation
-- ✅ File path validation (no directory traversal)
-- ✅ Dict sanitization with nesting depth limits
-- ✅ Defense against malicious input
+### Phase 2: AI Agent System
 
-#### JobStore/Queue
-- ✅ In-memory job queue with lifecycle tracking
-- ✅ Status progression: queued → running → completed/failed
-- ✅ Progress tracking (0-100%)
-- ✅ Project-scoped job queries
-- ✅ Job serialization to JSON
-- ✅ Automatic cleanup of old jobs
+#### 6 Agents with LLM Model Router
 
-#### LLMOrchestrator
-- ✅ Model Router with intelligent selection
-- ✅ Async OpenAI client integration
-- ✅ Async Anthropic client integration
-- ✅ Agent-specific temperature/max_tokens
-- ✅ Error handling and rate limit detection
-- ✅ Timeout protection
+| Agent | Model | Purpose |
+|---|---|---|
+| Research | GPT-4o | Requirements spec from one-liner ideas with clarification loop |
+| Wireframe | GPT-4o | Architecture spec (sitemap, component tree, global state) |
+| Code | Gemini 1.5 Pro | Production code generation (1M token context window) |
+| QA | GPT-4o | Code review with severity scoring (critical/warning/info) |
+| Pedagogy | Claude 3.5 Sonnet | Socratic mentoring with 3-option choice frameworks |
+| Roadmap | Claude 3.5 Sonnet | Personalized learning curriculum with prerequisites |
 
-### 5. **Enhanced Schemas** (Commit: d4f33b8)
-- ✅ Pydantic v2 strict validation
-- ✅ Enum types for agent/status types
-- ✅ Field constraints (min/max lengths, patterns)
-- ✅ Custom validators (color format, path safety)
-- ✅ Extra='forbid' to reject unknown fields
-- ✅ Separate request/response models
-- ✅ Agent output schemas prevent hallucinations
+#### LLM Infrastructure
+- **Model Router** (`llm.py`): 3 providers (OpenAI, Google, Anthropic), agent-specific temperature/max_tokens
+- **Circuit Breaker** (`resilience.py`): Tracks failures per provider, opens after threshold, exponential backoff
+- **`resilient_llm_call()`**: Wraps every `prompt | llm | PydanticOutputParser` chain with retry + circuit breaker
+- **RAG Memory** (`memory.py`): pgvector similarity search for architectural patterns
 
-### 6. **Agent System** (Commits: 20ffda9, 6565157)
+#### LangGraph Workflows
+- **StateGraph**: `PipelineState` TypedDict with conditional edges
+- **Builder Pipeline**: Research → Wireframe → Code → QA (with retry loop)
+- **Orchestrator**: Agent routing + dispatching with error handling
 
-#### Prompts (20ffda9)
-- ✅ Research Agent: Product Manager persona
-- ✅ Wireframe Agent: System Architect
-- ✅ Code Agent: Senior Developer
-- ✅ QA Agent: Testing Specialist
-- ✅ Pedagogy Agent: Socratic Mentor
-- ✅ Centralized template management
+#### Pydantic v2 Schemas (717 lines)
+- Strict validation with `extra='forbid'`
+- Enum types for agent/status types
+- Custom validators (color format, path safety, field constraints)
+- Separate request/response models
+- Agent-specific output schemas (RequirementDoc, ArchitectureSpec, GeneratedFile, QAReport, etc.)
 
-#### Orchestrator (6565157)
-- ✅ Async agent router with error handling
-- ✅ Individual implementations per agent
-- ✅ Timeout enforcement (180-300s per agent)
-- ✅ JSON response parsing with fallbacks
-- ✅ Result storage in Supabase
-- ✅ Detailed execution logging
+### Phase 3: Persistent Task Queue
 
-### 7. **API Endpoints** (Commits: 4a8f813, 37ed477)
+#### Celery + Redis
+- **`celery_app.py`**: Celery configuration with Redis broker/backend
+- **`tasks.py`**: Async task definitions for agent execution
+- **`task_acks_late`**: No task loss on worker crashes
+- **BackgroundTasks fallback**: Graceful degradation if Celery unavailable
+- **Job cancellation**: `revoke()` with `SIGTERM` for running tasks
 
-#### Agent Endpoints (4a8f813)
-- ✅ POST `/v1/run-agent - Trigger async job
-  - UUID validation
-  - Context size limits (50KB)
-  - Estimated time per agent
-  - Job ID returned immediately
-- ✅ GET `/v1/jobs/{job_id}` - Poll job status
-  - Progress tracking
-  - Result/error fields
-  - Timestamp tracking
-- ✅ GET `/v1/jobs/{project_id}/list` - List project jobs
-  - Pagination (max 100)
-  - Sorted by creation date
+#### Docker Compose
+- Redis service (persistent task queue)
+- FastAPI service (API server)
+- Celery Worker service (task execution)
+- Flower service (monitoring dashboard at `:5555`)
 
-#### Project Endpoints (37ed477)
-- ✅ POST `/v1/projects/` - Create project
-- ✅ GET `/v1/projects/{project_id}` - Fetch project
-- ✅ PUT `/v1/projects/{project_id}` - Update project
-- ✅ GET `/v1/projects/{project_id}/files` - List files
-- ✅ POST `/v1/projects/{project_id}/files` - Create file
-  - Path traversal prevention
-  - 100KB file size limit
-  - Language validation
+### Phase 4: Real-Time Updates
 
-### 8. **Main Application** (Commit: 2014228)
-- ✅ FastAPI app factory with lifespan management
-- ✅ Comprehensive error handlers
-  - CodeForgeException handler
-  - Validation error handler with details
-  - Generic exception handler (sanitized)
-- ✅ Middleware stack in proper order
-- ✅ Health check endpoint
-- ✅ Environment-aware docs hiding
+#### SSE Streaming
+- `GET /v1/jobs/{job_id}/stream` — Server-Sent Events for live progress
+- Events: `status`, `progress`, `result`, `error`, `heartbeat`
+- Auto-reconnect support with event IDs
 
-### 9. **Test Suite** (Commit: 957f7c1)
+#### Supabase Realtime
+- `agent_jobs` table with Realtime publication (migration 0007)
+- `projects` table status changes propagated to frontend
+- Frontend subscribes to `postgres_changes` for live UI updates
 
-#### Test Coverage
-- ✅ API endpoint tests
-  - Health check verification
-  - Valid/invalid input handling
-  - Response format validation
-- ✅ Input validation tests
-  - String sanitization
-  - UUID validation
-  - Email/URL validation
-  - Path traversal prevention
-- ✅ Job queue tests
-  - Job creation and retrieval
-  - Status updates
-  - Progress tracking
-- ✅ Exception tests
-  - Custom exception creation
-  - Status code mapping
+### Phase 5: Security Hardening
 
-#### Test Infrastructure
-- ✅ Pytest configuration
-- ✅ FastAPI TestClient fixture
-- ✅ Sample data fixtures
-- ✅ Test markers (unit, integration, slow)
+- CSRF double-submit cookie (bypass for `Authorization: Bearer` requests)
+- Error sanitization (generic messages in production, details in dev only)
+- `_db_execute()` wrapper on all database calls (consistent error handling)
+- Path traversal prevention on file operations
+- File size limits (100KB max)
+- Context size limits (50KB max)
+- Request payload limits
+- Rate limiting with graceful 429 responses
 
-### 10. **Documentation** (Commit: 65128ba)
+### Phase 6: API Endpoints (~25 endpoints)
 
-#### README_BACKEND.md (3900+ lines)
-- ✅ Architecture overview with ASCII diagrams
-- ✅ Project structure explanation
-- ✅ Development setup instructions
-- ✅ Testing guide
-- ✅ Production deployment
-- ✅ Complete API documentation
-- ✅ Environment variables reference
-- ✅ Security practices checklist
-- ✅ Performance considerations
-- ✅ Troubleshooting guide
-- ✅ Future improvements
+#### Agent Endpoints
+- `POST /v1/run-agent` — Dispatch single agent via Celery
+- `POST /v1/run-pipeline` — Full builder pipeline (Research → QA)
+- `GET /v1/jobs/{job_id}` — Job status polling
+- `GET /v1/jobs/{job_id}/stream` — SSE streaming
+- `POST /v1/clarification/{job_id}/respond` — Clarification loop
+- `GET /v1/jobs/{project_id}/list` — List project jobs
+- `POST /v1/jobs/{job_id}/cancel` — Cancel running job
+- `POST /v1/refactor` — AI-powered code refactoring
 
-#### requirements.txt
-- ✅ FastAPI, Uvicorn, Pydantic
-- ✅ LLM clients (OpenAI, Anthropic, Google)
-- ✅ Database (Supabase SDK)
-- ✅ Orchestration (LangChain, LangGraph)
-- ✅ Testing (Pytest, HTTPx)
+#### Project Endpoints
+- `POST /v1/projects/` — Create project
+- `GET /v1/projects/{project_id}` — Fetch project
+- `PUT /v1/projects/{project_id}` — Update project
+- `GET /v1/projects/{project_id}/files` — List files
+- `POST /v1/projects/{project_id}/files` — Create file
+- `PUT /v1/projects/{project_id}/files/{file_id}` — Update file
+- `DELETE /v1/projects/{project_id}/files/{file_id}` — Delete file
+
+#### Profile Endpoints
+- `GET /v1/profiles/me` — Current user profile
+- `PUT /v1/profiles/me` — Update profile
+
+#### Student Endpoints
+- `POST /v1/student/roadmap` — Generate learning roadmap
+- `POST /v1/student/session` — Start mentoring session
+- `GET /v1/student/sessions/{project_id}` — List sessions
+- `GET /v1/student/progress/{project_id}` — Progress dashboard
+
+#### GitHub Endpoints
+- `POST /v1/github/export` — Export project to GitHub repo
+
+#### Infrastructure
+- `GET /health` — Health check
+- `GET /docs` — Swagger UI (dev only)
+- `GET /redoc` — ReDoc (dev only)
+
+### Phase 7: Test Suite (297 tests)
+
+| Test File | Coverage |
+|---|---|
+| `test_agents.py` | Agent unit tests |
+| `test_auth.py` | JWT auth verification |
+| `test_endpoints.py` | API endpoint tests |
+| `test_exceptions.py` | Custom exception classes |
+| `test_github.py` | GitHub integration |
+| `test_graph_workflows.py` | LangGraph workflow tests |
+| `test_hardening.py` | Security hardening |
+| `test_job_queue.py` | Job lifecycle |
+| `test_middleware.py` | Middleware tests |
+| `test_new_features.py` | Celery/SSE/Realtime tests |
+| `test_orchestrator.py` | Orchestrator tests |
+| `test_profiles.py` | Profile endpoint tests |
+| `test_projects.py` | Project CRUD tests |
+| `test_student.py` | Student mode tests |
+| `test_validation.py` | Input validation tests |
+
+## Statistics
+
+| Metric | Value |
+|---|---|
+| AI Agents | 6 (Research, Wireframe, Code, QA, Pedagogy, Roadmap) |
+| LLM Providers | 3 (OpenAI, Google, Anthropic) |
+| API Endpoints | ~25 |
+| Test Cases | 297 |
+| Test Files | 16 (15 test files + conftest.py) |
+| Schema Lines | 717 (protocol.py) |
+| Migrations | 7 |
+| Database Tables | 7 |
+| Exception Classes | 10 |
+| Middleware | 4 (CSRF, Rate Limit, Request Tracking, CORS) |
 
 ## Architecture Highlights
 
 ### Security
-```python
-✓ Input validation (Pydantic + custom validators)
-✓ Rate limiting (60 req/min per IP/user)
-✓ Error sanitization (no stack traces in production)
-✓ RLS enforcement (database level)
-✓ Secret management (environment variables)
-✓ Path traversal prevention
-✓ Size limits (requests, files, context)
-```
+- Input validation (Pydantic v2 + custom validators)
+- Rate limiting (60 req/min per IP/user)
+- CSRF protection (double-submit cookie)
+- Error sanitization (no internals in production responses)
+- RLS enforcement (database-level user isolation)
+- Secret management (environment variables, validated at startup)
+- Path traversal prevention
+- Size limits (requests, files, context)
 
 ### Performance
-```python
-✓ Async/await throughout
-✓ Non-blocking background tasks
-✓ Timeout enforcement (5 min max)
-✓ Job status polling (no database polling)
-✓ Efficient JSON logging
-✓ Token bucket rate limiting
-```
+- Async/await throughout FastAPI
+- Celery + Redis for persistent background execution
+- SSE streaming for real-time progress
+- Supabase Realtime for status propagation
+- Circuit breaker for LLM resilience
+- Token bucket rate limiting
 
 ### Observability
-```python
-✓ Structured JSON logging
-✓ Request ID tracing
-✓ Detailed error messages (server-side)
-✓ Progress tracking
-✓ Execution timing
+- Structured JSON logging
+- Request ID tracing
+- Flower dashboard (Celery monitoring)
+- Health check endpoint
+
+## Quick Start
+
+```bash
+# Option A: Docker Compose
+cp backend/.env.example backend/.env
+docker-compose up --build
+
+# Option B: Manual
+cd backend
+pip install -r requirements.txt
+cp .env.example .env              # Edit with your API keys
+uvicorn app.main:app --reload     # API server
+celery -A app.workers.celery_app worker --loglevel=info  # Task worker
+
+# Run tests
+pytest
+
+# API docs
+open http://localhost:8000/docs
 ```
-
-### Maintainability
-```python
-✓ Modular service layer
-✓ Clear separation of concerns
-✓ Comprehensive documentation
-✓ Type hints throughout
-✓ Error handling patterns
-✓ Test coverage
-```
-
-## Git Commits
-
-```
-65128ba - docs(backend): add dependencies and documentation
-957f7c1 - test(backend): add comprehensive test suite
-2014228 - feat(backend): upgrade main.py with production error handling
-37ed477 - feat(backend): refactor project API endpoints with comprehensive validation
-4a8f813 - feat(backend): refactor agent API endpoints with validation
-6565157 - feat(backend): implement comprehensive agent orchestrator
-20ffda9 - feat(backend): add agent system prompts and routing
-d4f33b8 - feat(backend): enhanced pydantic schemas with strict validation
-8d3e9a1 - feat(backend): add core services layer
-c42f5d7 - feat(backend): add middleware layer for request tracking and rate limiting
-d674e41 - feat(backend): add structured logging and custom exception classes
-```
-
-## Statistics
-
-- **Total Commits**: 11 focused commits
-- **Lines of Code**: 3,500+ production + 700+ test code
-- **Test Coverage**: 
-  - API endpoints: 6 tests
-  - Input validation: 8 tests
-  - Job queue: 7 tests
-  - Exceptions: 6 tests
-- **Services**: 4 major services
-- **API Endpoints**: 8 endpoints
-- **Agent Types**: 5 agents with full implementations
-- **Exception Classes**: 10 custom exceptions
-
-## Key Features Implemented
-
-### Security (17 requirements met)
-1. ✅ Rate limiting with graceful handling
-2. ✅ Input validation and sanitization
-3. ✅ SQL injection prevention (parameterized Supabase)
-4. ✅ Secret management via environment
-5. ✅ Authentication ready (JWT structure prepared)
-6. ✅ Authorization via RLS
-7. ✅ Data minimization
-8. ✅ HTTPS enforcement path
-9. ✅ Secure error handling
-10. ✅ Dependency management
-11. ✅ CSRF protection ready
-12. ✅ Output encoding via Pydantic
-13. ✅ Resource limits enforced
-14. ✅ Data privacy by design
-15. ✅ Attack surface reduction
-16. ✅ Security documentation
-17. ✅ Backward compatibility maintained
-
-### Performance Features
-- Async I/O throughout FastAPI
-- Background task execution
-- Job queue with progress tracking
-- Rate limiting to prevent abuse
-- Size limits to prevent exhaustion
-- Timeout enforcement
-
-### Production Readiness
-- Comprehensive error handling
-- Structured logging
-- Test coverage
-- Documentation
-- Environment configuration
-- Health checks
-- Request tracing
-
-## Next Steps
-
-To use this backend:
-
-1. **Install dependencies**
-   ```bash
-   pip install -r backend/requirements.txt
-   ```
-
-2. **Configure environment**
-   ```bash
-   cp backend/.env.example backend/.env
-   # Edit with your API keys
-   ```
-
-3. **Run tests**
-   ```bash
-   pytest backend/tests/
-   ```
-
-4. **Start dev server**
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-
-5. **API docs**
-   - Swagger: http://localhost:8000/docs
-   - ReDoc: http://localhost:8000/redoc
-
-## Code Quality
-
-- ✅ Type hints on all functions
-- ✅ Comprehensive docstrings
-- ✅ Error handling patterns consistent
-- ✅ Security comments where critical
-- ✅ No hard-coded secrets
-- ✅ No unused imports
-- ✅ Follows PEP 8
-
-## Conclusion
-
-The backend is now **production-ready** with:
-- Proper error handling and logging
-- Comprehensive input validation
-- Rate limiting and security
-- Async-first architecture
-- Full test coverage
-- Complete documentation
-- 11 incremental, well-documented commits
-
-All code is pushed to GitHub and ready for deployment!

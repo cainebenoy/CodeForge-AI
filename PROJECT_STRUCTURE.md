@@ -3,69 +3,43 @@
 ```
 CodeForge AI/
 ├── .github/
-│   ├── workflows/
-│   │   ├── web-deploy.yml          # Next.js CI/CD
-│   │   └── backend-deploy.yml      # FastAPI CI/CD
-│   └── copilot-instructions.md     # AI coding guidelines
-│
-├── .vscode/
-│   ├── settings.json               # VS Code workspace settings
-│   └── extensions.json             # Recommended extensions
+│   └── copilot-instructions.md     # AI coding guidelines & dev patterns
 │
 ├── web/                            # Next.js 14 Frontend
 │   ├── public/                     # Static assets
 │   ├── src/
 │   │   ├── app/                    # Next.js App Router
 │   │   │   ├── (auth)/            # Auth route group
-│   │   │   │   ├── login/page.tsx
-│   │   │   │   └── layout.tsx
 │   │   │   ├── (dashboard)/       # Dashboard route group
-│   │   │   │   ├── builder/
-│   │   │   │   │   └── [projectId]/page.tsx
-│   │   │   │   ├── student/
-│   │   │   │   │   └── [projectId]/page.tsx
-│   │   │   │   ├── layout.tsx
-│   │   │   │   └── page.tsx
+│   │   │   │   ├── builder/       # Builder Mode routes
+│   │   │   │   └── student/       # Student Mode routes
 │   │   │   ├── layout.tsx         # Root layout
 │   │   │   ├── providers.tsx      # React Query + Theme providers
 │   │   │   ├── page.tsx           # Landing page
 │   │   │   └── globals.css        # Tailwind styles
 │   │   │
 │   │   ├── components/
-│   │   │   ├── ui/                # Shadcn primitives
-│   │   │   │   └── button.tsx
-│   │   │   ├── shared/            # Shared components
-│   │   │   │   └── ThemeToggle.tsx
-│   │   │   └── features/          # Feature-specific
-│   │   │       ├── builder/
-│   │   │       │   ├── SpecViewer.tsx
-│   │   │       │   └── FileTree.tsx
-│   │   │       ├── student/
-│   │   │       │   └── ChoiceCard.tsx
-│   │   │       ├── editor/
-│   │   │       │   └── CodeEditor.tsx
-│   │   │       └── chat/
-│   │   │           └── ChatBubble.tsx
+│   │   │   ├── ui/                # Shadcn primitives (Button, Card, etc.)
+│   │   │   ├── shared/            # Reusable compounds (ThemeToggle, etc.)
+│   │   │   └── features/          # Feature-specific components
+│   │   │       ├── builder/       # SpecViewer, FileTree, etc.
+│   │   │       ├── student/       # ChoiceCard, etc.
+│   │   │       ├── editor/        # Monaco Editor wrappers
+│   │   │       └── chat/          # Agent Chat Interface
 │   │   │
 │   │   ├── lib/
-│   │   │   ├── supabase/
-│   │   │   │   ├── client.ts      # Browser client
-│   │   │   │   └── server.ts      # Server client
-│   │   │   ├── hooks/
-│   │   │   │   └── use-project.ts
-│   │   │   ├── api.ts             # API client (axios)
-│   │   │   └── utils.ts           # Helper functions
+│   │   │   ├── supabase/          # Supabase clients (browser + server)
+│   │   │   ├── hooks/             # Custom React hooks
+│   │   │   ├── api.ts             # Backend API client
+│   │   │   └── utils.ts           # Helper functions (cn, formatters)
 │   │   │
 │   │   ├── store/                 # Zustand stores
-│   │   │   ├── useBuilderStore.ts
-│   │   │   └── useStudentStore.ts
+│   │   │   ├── useBuilderStore.ts # Builder Mode UI state
+│   │   │   └── useStudentStore.ts # Student Mode UI state
 │   │   │
 │   │   └── types/
 │   │       └── database.types.ts  # Supabase generated types
 │   │
-│   ├── .env.example
-│   ├── .eslintrc.js
-│   ├── .prettierrc
 │   ├── next.config.js
 │   ├── package.json
 │   ├── tailwind.config.ts
@@ -73,160 +47,209 @@ CodeForge AI/
 │
 ├── backend/                        # Python FastAPI Backend
 │   ├── app/
-│   │   ├── main.py                # FastAPI entry point
+│   │   ├── __init__.py
+│   │   ├── main.py                # FastAPI app factory + middleware stack
 │   │   │
-│   │   ├── core/
-│   │   │   └── config.py          # Settings (Pydantic)
+│   │   ├── core/                  # Core infrastructure
+│   │   │   ├── __init__.py
+│   │   │   ├── auth.py            # JWT verification (Supabase)
+│   │   │   ├── config.py          # Settings (Pydantic BaseSettings)
+│   │   │   ├── exceptions.py      # 10 custom exception classes
+│   │   │   └── logging.py         # Structured JSON logging
 │   │   │
-│   │   ├── api/
+│   │   ├── middleware/            # ASGI middleware chain
+│   │   │   ├── __init__.py
+│   │   │   ├── csrf.py            # Double-submit cookie CSRF
+│   │   │   ├── rate_limiter.py    # Token bucket rate limiter
+│   │   │   └── request_tracking.py # Request ID tracing
+│   │   │
+│   │   ├── api/                   # HTTP layer
+│   │   │   ├── __init__.py
 │   │   │   ├── router.py          # Route aggregator
 │   │   │   └── endpoints/
-│   │   │       ├── agents.py      # POST /run-agent
-│   │   │       └── projects.py    # Project CRUD
+│   │   │       ├── __init__.py
+│   │   │       ├── agents.py      # Agent execution + SSE streaming
+│   │   │       ├── projects.py    # Project CRUD + file management
+│   │   │       ├── profiles.py    # User profile endpoints
+│   │   │       └── student.py     # Student mode endpoints
 │   │   │
-│   │   ├── agents/
-│   │   │   ├── core/
-│   │   │   │   ├── llm.py         # Model router
-│   │   │   │   └── memory.py      # RAG vector search
-│   │   │   ├── research_agent.py  # Requirements generation
-│   │   │   ├── wireframe_agent.py # Architecture design
-│   │   │   ├── code_agent.py      # Code generation
-│   │   │   ├── qa_agent.py        # Code validation
-│   │   │   ├── pedagogy_agent.py  # Socratic mentor
-│   │   │   └── orchestrator.py    # Agent workflow
+│   │   ├── agents/                # AI Agent system
+│   │   │   ├── __init__.py
+│   │   │   ├── research_agent.py  # Requirements generation (GPT-4o)
+│   │   │   ├── wireframe_agent.py # Architecture design (GPT-4o)
+│   │   │   ├── code_agent.py      # Code generation (Gemini 1.5 Pro)
+│   │   │   ├── qa_agent.py        # Code review (GPT-4o)
+│   │   │   ├── pedagogy_agent.py  # Socratic mentor (Claude 3.5 Sonnet)
+│   │   │   ├── roadmap_agent.py   # Learning curriculum (Claude 3.5 Sonnet)
+│   │   │   ├── prompts.py         # Centralized system prompts
+│   │   │   ├── orchestrator.py    # Agent routing + execution
+│   │   │   │
+│   │   │   ├── core/              # Agent infrastructure
+│   │   │   │   ├── __init__.py
+│   │   │   │   ├── llm.py         # LLM model router (3 providers)
+│   │   │   │   ├── memory.py      # RAG vector search (pgvector)
+│   │   │   │   └── resilience.py  # Circuit breaker + retry logic
+│   │   │   │
+│   │   │   └── graph/             # LangGraph workflows
+│   │   │       ├── __init__.py
+│   │   │       ├── state.py       # TypedDict pipeline state
+│   │   │       ├── nodes.py       # Graph node functions
+│   │   │       └── workflows.py   # StateGraph definitions
 │   │   │
-│   │   ├── schemas/
-│   │   │   └── protocol.py        # Pydantic models
+│   │   ├── schemas/               # Data contracts
+│   │   │   ├── __init__.py
+│   │   │   └── protocol.py        # 717 lines of Pydantic v2 schemas
 │   │   │
-│   │   └── services/
-│   │       ├── supabase.py        # Database client
-│   │       └── github.py          # GitHub API integration
+│   │   ├── services/              # Business logic
+│   │   │   ├── __init__.py
+│   │   │   ├── supabase.py        # Supabase client wrapper
+│   │   │   ├── database.py        # DatabaseOperations (CRUD + RLS)
+│   │   │   ├── github.py          # GitHub API integration
+│   │   │   ├── job_queue.py       # In-memory job store
+│   │   │   └── validation.py      # InputValidator (sanitization)
+│   │   │
+│   │   └── workers/               # Celery task queue
+│   │       ├── __init__.py
+│   │       ├── celery_app.py      # Celery configuration
+│   │       └── tasks.py           # Async task definitions
 │   │
-│   ├── tests/
-│   │   └── test_agents.py
+│   ├── tests/                     # Test suite (297 tests)
+│   │   ├── __init__.py
+│   │   ├── conftest.py            # Fixtures + test configuration
+│   │   ├── test_agents.py         # Agent unit tests
+│   │   ├── test_auth.py           # JWT auth tests
+│   │   ├── test_endpoints.py      # API endpoint tests
+│   │   ├── test_exceptions.py     # Custom exception tests
+│   │   ├── test_github.py         # GitHub integration tests
+│   │   ├── test_graph_workflows.py # LangGraph workflow tests
+│   │   ├── test_hardening.py      # Security hardening tests
+│   │   ├── test_job_queue.py      # Job queue lifecycle tests
+│   │   ├── test_middleware.py     # Middleware tests
+│   │   ├── test_new_features.py   # Celery/SSE/Realtime tests
+│   │   ├── test_orchestrator.py   # Orchestrator tests
+│   │   ├── test_profiles.py       # Profile endpoint tests
+│   │   ├── test_projects.py       # Project CRUD tests
+│   │   ├── test_student.py        # Student mode tests
+│   │   └── test_validation.py     # Input validation tests
 │   │
-│   ├── .env.example
-│   ├── Dockerfile
-│   ├── pyproject.toml             # Poetry dependencies
-│   └── README.md
+│   ├── Dockerfile                 # Production container
+│   ├── pyproject.toml             # Python dependencies
+│   ├── pytest.ini                 # Pytest configuration
+│   ├── requirements.txt           # Pip dependencies
+│   ├── README.md                  # Quick reference
+│   └── README_BACKEND.md          # Comprehensive backend guide
 │
 ├── database/                       # Supabase SQL Migrations
 │   ├── migrations/
-│   │   ├── 0001_init_schema.sql   # Core tables
-│   │   ├── 0002_rls_policies.sql  # Row Level Security
-│   │   └── 0003_vector_embeddings.sql  # pgvector
+│   │   ├── 0001_init_schema.sql        # Core tables (profiles, projects, files)
+│   │   ├── 0002_rls_policies.sql       # Row Level Security policies
+│   │   ├── 0003_vector_embeddings.sql  # pgvector + pattern_embeddings
+│   │   ├── 0004_match_patterns_rpc.sql # Similarity search RPC function
+│   │   ├── 0005_add_duration_minutes.sql # Session duration tracking
+│   │   ├── 0006_project_status_constraint.sql # Status enum constraint
+│   │   └── 0007_agent_jobs_realtime.sql # agent_jobs table + Realtime
 │   │
 │   ├── seeds/
 │   │   └── seed.sql               # Initial data
 │   │
 │   ├── config.toml                # Supabase config
-│   └── README.md
+│   └── README.md                  # Database documentation
 │
 ├── docs/                           # Documentation
-│   ├── Tech_Stack.md
-│   ├── Backend_Schema.md
-│   ├── Frontend_Guidelines.md
-│   ├── Implementation_Details.md
-│   ├── App_Flow.md
-│   └── PRD.md
+│   ├── PRD.md                     # Product Requirements Document
+│   ├── Tech_Stack.md              # Technology stack & architecture
+│   ├── Backend_Schema.md          # Database schema & API contracts
+│   ├── Frontend_Guidelines.md     # Component patterns & design system
+│   ├── Implementation_Details.md  # Implementation progress & roadmap
+│   └── App_Flow.md                # User journeys & agent flows
 │
-├── .gitignore
-└── README.md
+├── docker-compose.yml             # Redis + FastAPI + Celery + Flower
+├── BACKEND_IMPLEMENTATION.md      # Backend implementation summary
+├── PROJECT_STRUCTURE.md           # This file
+├── README.md                      # Project overview
+└── .gitignore
 ```
 
 ## Key Architectural Decisions
 
 ### Monorepo Structure
-- `/web` - Next.js frontend (TypeScript)
-- `/backend` - FastAPI backend (Python)
-- `/database` - Supabase migrations (SQL)
+- `/web` — Next.js frontend (TypeScript)
+- `/backend` — FastAPI backend (Python)
+- `/database` — Supabase migrations (SQL)
 
 ### Security by Design
 - RLS on all database tables
-- Pydantic validation on all inputs
-- Secrets in environment variables only
-- HTTPS enforced in production
-- Rate limiting on all endpoints
+- Pydantic v2 strict validation on all inputs
+- CSRF double-submit cookie protection
+- Token bucket rate limiting (60 req/min)
+- Error sanitization (no stack traces to clients)
+- Secrets validated at startup from environment variables
 
-### State Management
+### Task Execution
+- **Celery + Redis** for persistent background task queue
+- **`task_acks_late`** ensures no task loss on worker crashes
+- **BackgroundTasks** fallback if Celery unavailable
+- **Flower** dashboard for monitoring at `:5555`
+
+### LLM Architecture
+- **Model Router**: 3 providers (OpenAI, Google, Anthropic) × 6 agents
+- **Circuit Breaker**: Prevents cascade failures on LLM outages
+- **LangChain LCEL**: `prompt | llm | PydanticOutputParser` chains
+- **LangGraph**: StateGraph with conditional edges for multi-agent pipelines
+- **RAG with pgvector**: Pattern matching from previous projects
+
+### State Management (Frontend)
 - **Server State**: React Query (TanStack Query)
 - **Local UI State**: Zustand
 - **Shareable State**: URL parameters
 
-### LLM Architecture
-- **Model Router**: Optimizes cost vs intelligence
-- **Pydantic Enforcement**: Strict schemas prevent hallucination
-- **LangGraph**: Manages cyclic agent workflows
-- **RAG with pgvector**: Pattern matching from previous projects
-
 ### Data Flow
 ```
 User → Next.js → Supabase (CRUD)
-User → Next.js → FastAPI → LLM → Supabase (Agent tasks)
+User → Next.js → FastAPI → Celery → LLM → Supabase (Agent tasks)
 Supabase Realtime → Next.js (Status updates)
+FastAPI SSE → Next.js (Streaming progress)
 ```
 
-## Next Steps
+## Quick Start
 
-1. **Install Dependencies**
-   ```bash
-   # Frontend
-   cd web && pnpm install
+```bash
+# Option A: Docker Compose
+cp backend/.env.example backend/.env
+docker-compose up --build
 
-   # Backend
-   cd backend && poetry install
-   ```
-
-2. **Setup Environment Variables**
-   ```bash
-   # Copy example files
-   cp web/.env.example web/.env.local
-   cp backend/.env.example backend/.env
-   ```
-
-3. **Initialize Supabase**
-   ```bash
-   cd database && supabase start
-   ```
-
-4. **Run Development Servers**
-   ```bash
-   # Terminal 1: Frontend
-   cd web && pnpm dev
-
-   # Terminal 2: Backend
-   cd backend && poetry run uvicorn app.main:app --reload
-   ```
+# Option B: Manual
+cd web && pnpm install && pnpm dev          # Terminal 1
+cd backend && pip install -r requirements.txt && uvicorn app.main:app --reload  # Terminal 2
+cd backend && celery -A app.workers.celery_app worker --loglevel=info          # Terminal 3
+```
 
 ## Technology Stack
 
 **Frontend**
-- Next.js 14 (App Router)
-- TypeScript (Strict mode)
+- Next.js 14 (App Router), TypeScript (Strict mode)
 - Tailwind CSS + Shadcn/UI
 - React Query + Zustand
 - Monaco Editor
 
 **Backend**
-- Python 3.11+
-- FastAPI
+- Python 3.11+, FastAPI
 - LangChain + LangGraph
-- Pydantic (validation)
-- Instructor (structured LLM outputs)
+- Pydantic v2 (strict validation, 717 lines of schemas)
+- Celery + Redis (persistent task queue)
 
 **Database**
-- Supabase (PostgreSQL)
+- Supabase (PostgreSQL) with 7 migrations
 - pgvector (RAG embeddings)
 - Row Level Security (RLS)
+- Supabase Realtime (agent_jobs + projects)
 
 **AI Models**
-- GPT-4o (Research, QA)
-- Gemini 1.5 Pro (Code generation)
-- Claude 3.5 Sonnet (Pedagogy)
-- Gemini Flash (Routing)
+- OpenAI GPT-4o (Research, Wireframe, QA)
+- Google Gemini 1.5 Pro (Code generation)
+- Anthropic Claude 3.5 Sonnet (Pedagogy, Roadmap)
 
 **Infrastructure**
-- Vercel (Frontend)
-- Railway/Render (Backend)
-- Supabase (Database)
-- GitHub Actions (CI/CD)
+- Docker Compose (Redis, FastAPI, Celery, Flower)
+- Vercel (Frontend), Railway/Render (Backend)
+- 297 tests across 16 test files

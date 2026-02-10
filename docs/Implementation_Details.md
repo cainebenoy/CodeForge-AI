@@ -1,168 +1,136 @@
 # CodeForge AI — Master Implementation Plan
 
-**Document Purpose:** A step-by-step execution roadmap to take CodeForge from zero to Public Beta in 10 weeks. It prioritizes the "Builder Mode" core first, then layers "Student Mode" on top.
+**Document Purpose:** A step-by-step execution roadmap for CodeForge from zero to Public Beta. Prioritizes "Builder Mode" core first, then layers "Student Mode" on top. Reflects current implementation status.
 
-**Total Timeline:** 10 Weeks
-**Team Assumption:** 1 Full Stack Engineer (You) + AI Agents
+**Team Assumption:** 1 Full Stack Engineer + AI Agents
 
-## Phase 1: The Foundation (Weeks 1-2)
+## Phase 1: The Foundation (Weeks 1-2) ✅ COMPLETE
 
 **Goal:** A working "Skeleton" where a user can log in, create a project, and see a dashboard. The Python Engine is connected to the Next.js App.
 
-### Week 1: Infrastructure & Auth
+### Week 1: Infrastructure & Auth ✅
 
-- **Day 1: Repo Setup**
-    - Initialize Next.js 14 App Router project (`create-next-app`).
-    - Setup Tailwind CSS + Shadcn/UI.
-    - Configure ESLint and Prettier.
-    - Commit initial structure.
-- **Day 2: Supabase Init**
-    - Create Supabase Project.
-    - Run SQL scripts from `CodeForge_Backend_Schema.md` (Tables + RLS).
-    - Setup Supabase Auth (GitHub + Email).
-    - Create `supabase-client.ts` helper in Next.js.
-- **Day 3: Frontend Shell**
-    - Build `/(auth)/login` page.
-    - Build `/(dashboard)/page.tsx` (Project List).
-    - Build `/(dashboard)/[projectId]/layout.tsx` (Sidebar + Header).
-- **Day 4-5: Python Engine Skeleton**
-    - Initialize FastAPI project in a separate directory (or repo).
-    - Setup Poetry/Pipenv.
-    - Create a simple `/health` endpoint.
-    - Deploy Python Engine to **Railway/Render**.
-    - Deploy Next.js to **Vercel**.
-    - **Verify:** Next.js can call Python `/health` and get a 200 OK.
+- **Repo Setup:** Next.js 14 App Router + Tailwind CSS + Shadcn/UI + ESLint/Prettier
+- **Supabase Init:** SQL migrations for tables, RLS policies, pgvector extension
+- **Frontend Shell:** Auth pages, dashboard layout, project list
+- **Python Engine Skeleton:** FastAPI project with modular structure, `/health` endpoint, Dockerfile for containerized deployment
 
-### Week 2: Agent Orchestration Core
+### Week 2: Agent Orchestration Core ✅
 
-- **Day 1: LangChain Setup**
-    - Install `langchain`, `pydantic`, `instructor`.
-    - Configure API Keys (OpenAI, Gemini).
-- **Day 2: Database Connection**
-    - Install `supabase-py` in Python service.
-    - Create a function to fetch `project_id` context from Supabase.
-- **Day 3: The Job Queue**
-    - Setup a simple async pattern (using FastAPI `BackgroundTasks` or Redis/BullMQ).
-    - Endpoint: `POST /run-agent` (Accepts `project_id`, returns `job_id`).
-- **Day 4-5: Realtime Feedback Loop**
-    - Implement Supabase Realtime in Next.js.
-    - **Test:** Next.js triggers a job -> Python updates a row in `projects` table -> Next.js UI updates automatically without reload.
+- **LangChain + LangGraph Setup:** Installed `langchain`, `langchain-openai`, `langchain-google-genai`, `langchain-anthropic`, `langgraph`, `pydantic`
+- **Database Connection:** `supabase-py` with service role key, async wrapper via `asyncio.to_thread`
+- **Job Queue:** InMemoryJobStore with thread-safe locking + Redis store option + Celery persistent task queue
+- **Realtime Feedback Loop:** Supabase Realtime on `projects` and `agent_jobs` tables + SSE streaming endpoint
 
-## Phase 2: The "Builder Mode" Logic (Weeks 3-6)
+## Phase 2: The "Builder Mode" Logic (Weeks 3-6) ✅ COMPLETE
 
 **Goal:** A user can input an idea and get a full Spec + File Structure.
 
-### Week 3: The Research Agent
+### Week 3: The Research Agent ✅
 
-- **Day 1: Prompt Engineering**
-    - Write System Prompt for "Product Manager Persona."
-    - Define `RequirementsDoc` Pydantic model.
-- **Day 2: Chat Interface**
-    - Build the Chat UI in Next.js (Streaming text).
-    - Implement the "Clarification Loop" (Agent asks user questions).
-- **Day 3-4: Document Rendering**
-    - Build `SpecViewer` component (Markdown renderer).
-    - Store the generated JSON in `projects.requirements_spec`.
-- **Day 5: Integration Test**
-    - Input: "Uber for Cats" -> Output: Full JSON Spec displayed in UI.
+- **Prompt Engineering:** System Prompt for "Product Manager Persona" (in `prompts.py`)
+- **Pydantic Schema:** `RequirementsDoc` with strict validation (`extra="forbid"`, min/max lengths)
+- **Clarification Loop:** Research Agent asks clarifying questions → user responds → spec refined with `WAITING_FOR_INPUT` status
+- **RAG Integration:** `search_similar_patterns()` enriches agent context with previous architectural patterns
+- **LLM Resilience:** `resilient_llm_call()` with circuit breaker + exponential backoff on all `chain.ainvoke()` calls
 
-### Week 4: The Wireframe Agent & Visualization
+### Week 4: The Wireframe Agent ✅
 
-- **Day 1: Architecture Logic**
-    - Write System Prompt for "System Architect."
-    - Define `WireframeSpec` Pydantic model.
-- **Day 2: The Tree View**
-    - Build `FileTree` component (using `lucide-react` icons).
-    - Visualize the component hierarchy from the JSON output.
-- **Day 3-5: Iteration UI**
-    - Allow user to "Reject" or "Regenerate" parts of the spec.
-    - Update the `projects` table state accordingly.
+- **Architecture Logic:** System Prompt for "System Architect"
+- **Pydantic Schema:** `WireframeSpec` with `PageRoute` and `Component` models
+- **Resilient Execution:** Wrapped with `resilient_llm_call()` for retry on transient failures
 
-### Week 5: Code Generation (The Heavy Lift)
+### Week 5: Code Generation ✅
 
-- **Day 1: The Code Agent**
-    - Switch to **Gemini 1.5 Pro** or **DeepSeek Coder** (Large Context).
-    - Prompt Strategy: "You are a Senior React Dev. Write file X based on Spec Y."
-- **Day 2: Virtual File System**
-    - Implement logic to write rows to `project_files` table.
-    - Ensure strict path uniqueness (`src/app/page.tsx`).
-- **Day 3-5: Streaming Code**
-    - **Critical:** Implement streaming response for code generation.
-    - UI: Show file being typed out line-by-line in the Monaco Editor.
+- **Code Agent:** Uses **Gemini 1.5 Pro** (1M token context) via Model Router
+- **Pydantic Schema:** `CodeGenerationResult` with file path, code, language, explanation
+- **Virtual File System:** Writes rows to `project_files` with unique `(project_id, path)` constraint
+- **Refactoring:** Separate refactor prompt for modifying existing code
 
-### Week 6: The Editor & Refinement
+### Week 6: QA & Pipeline ✅
 
-- **Day 1-2: Monaco Integration**
-    - Implement `@monaco-editor/react`.
-    - Connect it to `useProjectFiles` hook (TanStack Query).
-- **Day 3: "Refactor" Feature**
-    - Select code -> Right Click -> "Refactor with AI".
-    - Send selection to Python -> Return diff -> Apply change.
-- **Day 4-5: Polish Builder Mode**
-    - Fix UI glitches.
-    - Improve loading states ("Thinking...").
+- **QA Agent:** Code review with severity scoring (`critical`, `warning`, `info`)
+- **Builder Pipeline (LangGraph):** `Research → Wireframe → Code → QA` with conditional edge code→QA retry loop (max `MAX_AGENT_ITERATIONS` iterations)
+- **Progress Callbacks:** Pipeline emits progress updates through the job system
 
-## Phase 3: Student Mode & Pedagogy (Weeks 7-9)
+## Phase 3: Student Mode & Pedagogy (Weeks 7-9) ✅ COMPLETE
 
 **Goal:** Implement the "Learning Layer" and "Choice Framework."
 
-### Week 7: Curriculum Generation
+### Week 7: Curriculum Generation ✅
 
-- **Day 1: Assessment UI**
-    - Build the "Skill Quiz" component.
-    - Store `skill_level` in `profiles`.
-- **Day 2: Roadmap Logic**
-    - Create `RoadmapGenerator` agent.
-    - Input: `RequirementsDoc` + `skill_level`.
-    - Output: `LearningRoadmap` JSON (Weeks/Modules).
-- **Day 3-5: Kanban UI**
-    - Build the Roadmap view (Locked/Unlocked modules).
-    - Implement "Start Module" action.
+- **Roadmap Agent:** Uses Claude 3.5 Sonnet for Socratic curriculum design
+- **Pydantic Schema:** `LearningRoadmap` with `RoadmapModule` (title, steps, estimated_hours, prerequisites)
+- **Endpoints:** `POST /v1/student/roadmap`, `GET /v1/student/roadmap/{project_id}`, `PUT /v1/student/roadmap/{project_id}/progress`
 
-### Week 8: The "Choice Framework" (Killer Feature)
+### Week 8: The "Choice Framework" ✅
 
-- **Day 1: Trigger Logic**
-    - Define "Decision Nodes" in the roadmap (e.g., "Database Selection").
-    - Pedagogy Agent prompt to generate 3 options (Fast/Good/Educational).
-- **Day 2: The Card UI**
-    - Build the 3-Card overlay component.
-    - Make it interactive (Selection updates `learning_roadmaps` state).
-- **Day 3-5: Context Adaptation**
-    - **Hard Part:** Ensure subsequent AI tutorial steps respect the user's choice.
-    - *Test:* Choose "Firebase" -> Ensure next step explains `firebase.init()`, NOT `prisma.connect()`.
+- **Pedagogy Agent:** Generates 3 implementation options per decision node (beginner/intermediate/advanced difficulty)
+- **Pydantic Schema:** `ChoiceFramework` with `ImplementationOption` models
+- **Endpoints:** `POST /v1/student/choice-framework`, `POST /v1/student/choice-framework/select`
 
-### Week 9: Sandboxing & Interactive Session
+### Week 9: Mentor Chat & Sessions ✅
 
-- **Day 1-3: Sandpack Integration**
-    - Implement `Sandpack` for the code view in Student Mode.
-    - Inject `project_files` into the Sandpack virtual file system.
-- **Day 4-5: Mentor Chat**
-    - Implement the "Socratic" chat mode (Agent instructed NOT to give code answers).
-    - "Check My Code" button (QA Agent linter).
+- **Pedagogy Agent:** Socratic mentoring mode (hints, not answers)
+- **Session Tracking:** `daily_sessions` table with transcript, concepts covered, duration
+- **Progress Tracking:** `GET /v1/student/progress/{project_id}` with module completion percentage
 
-## Phase 4: Launch Prep (Week 10)
+## Phase 4: Production Hardening (Week 10) ✅ COMPLETE
 
 **Goal:** Production Readiness.
 
-### Week 10: Polish & Export
+### Security & Observability ✅
 
-- **Day 1: GitHub Export**
-    - Implement OAuth flow for GitHub.
-    - Create `POST /api/export-to-github` (Create repo, push files).
-- **Day 2: Security Audit**
-    - Verify RLS policies.
-    - Rate limit the API endpoints (Upstash Redis).
-- **Day 3: Landing Page**
-    - Update landing page with demo video.
-    - Add "Waitlist" or Stripe "Subscribe" button.
-- **Day 4: Analytics**
-    - Install PostHog or Mixpanel.
-    - Track: `agent_run_success`, `project_created`, `module_completed`.
-- **Day 5: LAUNCH**
-    - Post on Product Hunt / Twitter / LinkedIn.
+- **Structured JSON Logging:** Rotating file handler, request ID tracing
+- **Custom Exception Hierarchy:** 10 exception classes with HTTP status codes
+- **Error Sanitization:** Internal details logged server-side, generic messages to clients
+- **Middleware Stack:** CORS, CSRF (double-submit cookie + Bearer bypass), rate limiting (token bucket), request tracking
+- **Input Validation:** Pydantic v2 strict mode, custom validators, path traversal prevention, file size limits
+
+### GitHub Export ✅
+
+- **Git Data API:** Create repos, batch commit (blobs → tree → commit → ref)
+- **Validation:** Repo name validation, file path sanitization, per-request token handling
+
+### Infrastructure ✅
+
+- **Celery + Redis:** Persistent task queue with crash recovery (`task_acks_late=True`)
+- **Circuit Breaker:** Per-provider LLM resilience (CLOSED → OPEN → HALF_OPEN)
+- **Docker Compose:** Full stack: backend + redis + celery_worker + flower monitoring
+- **Dual Realtime:** SSE streaming + Supabase Realtime on `agent_jobs` table
+
+### Testing ✅
+
+- **297 tests** across 15 test files
+- Coverage: agents, auth, endpoints, exceptions, GitHub, LangGraph workflows, security hardening, job queue, middleware, orchestrator, profiles, projects, student mode, validation, new features (circuit breaker, resilience, CSRF bypass, error handling)
+
+## Current Implementation Statistics
+
+| Metric              | Count                                                     |
+| ------------------- | --------------------------------------------------------- |
+| AI Agents           | 6 (Research, Wireframe, Code, QA, Pedagogy, Roadmap)      |
+| LLM Providers       | 3 (OpenAI, Google, Anthropic)                             |
+| API Endpoints       | ~25 (agents, projects, profiles, student, GitHub, health) |
+| Pydantic Schemas    | 717 lines in `protocol.py`                                |
+| Database Migrations | 7                                                         |
+| Test Suite          | 297 tests, 15 test files                                  |
+| Test Status         | All passing                                               |
+
+## Remaining Frontend Work
+
+The backend is feature-complete. Remaining frontend implementation:
+
+1. **Builder Mode UI:** SpecViewer, FileTree, Monaco Editor integration
+2. **Student Mode UI:** Roadmap Kanban, Choice Framework cards, Mentor Chat
+3. **Real-Time Integration:** Subscribe to `agent_jobs` Realtime + SSE streaming
+4. **GitHub Export UI:** OAuth flow + export button
+5. **Sandpack Integration:** Client-side code execution for Student Mode
+6. **Landing Page:** Demo video, waitlist/subscription
 
 ## Checklist for Success
 
-1. **Don't Over-Engineer the Editor:** Monaco is complex. Stick to basic syntax highlighting and read-only modes initially. Don't try to build a full VS Code in the browser (use Sandpack for that).
-2. **Cache the Agents:** AI is slow and expensive. Use `pgvector` to find similar previous projects and reuse their architectural specs if possible.
-3. **Strict JSON:** If the Python Agent fails to output valid JSON, the UI *will* break. Use `instructor` library retry logic aggressively.
+1. **Don't Over-Engineer the Editor:** Monaco is complex. Stick to basic syntax highlighting initially.
+2. **Cache the Agents:** Use `pgvector` to find similar previous projects and reuse their specs.
+3. **Strict JSON:** All agents use `PydanticOutputParser` — schemas enforced, no free-form JSON.
+4. **Use Celery for Long Tasks:** Agent jobs run in Celery workers; FastAPI `BackgroundTasks` is only a fallback.
+5. **Circuit Breaker Protects LLMs:** Don't overload failing providers — the breaker opens after repeated failures and auto-recovers.

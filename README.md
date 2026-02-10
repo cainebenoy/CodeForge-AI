@@ -28,21 +28,24 @@ CodeForge AI is a hybrid monorepo with two distinct layers:
                   ▼
 ┌─────────────────────────────────────────────────┐
 │  Python FastAPI (Agent Engine)                  │
-│  • 4 AI Agents (Research/Wireframe/Code/Pedagogy)│
+│  • 6 AI Agents (Research/Wireframe/Code/QA/     │
+│    Pedagogy/Roadmap)                            │
 │  • LangChain/LangGraph orchestration            │
-│  • Pydantic strict validation                   │
+│  • Celery + Redis persistent task queue         │
+│  • Pydantic v2 strict validation                │
 └─────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
 
 ```
-codeforge-ai/
+CodeForge AI/
 ├── web/                    # Next.js 14 Frontend
 ├── backend/                # Python FastAPI Agent Engine
-├── database/               # Supabase SQL Migrations
+├── database/               # Supabase SQL Migrations (7 migrations)
 ├── docs/                   # Documentation
-└── .github/                # CI/CD Workflows
+├── docker-compose.yml      # Redis + Flower + Worker services
+└── .github/                # CI/CD Workflows & Copilot Instructions
 ```
 
 ## Quick Start
@@ -51,19 +54,31 @@ codeforge-ai/
 
 - Node.js 18+
 - Python 3.11+
-- Poetry (Python package manager)
+- Redis (local or Docker)
 - Supabase CLI
-- pnpm (or npm/yarn)
+- pnpm
 
-### Setup
+### Option A: Docker Compose (Recommended)
 
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/cainebenoy/CodeForge-AI.git
-   cd codeforge-ai
-   ```
+```bash
+# Clone and configure
+git clone https://github.com/cainebenoy/CodeForge-AI.git
+cd CodeForge-AI
 
-2. **Frontend Setup**
+# Copy env files
+cp backend/.env.example backend/.env
+# Edit backend/.env with your API keys
+
+# Start all services (Redis, FastAPI, Celery Worker, Flower)
+docker-compose up --build
+```
+
+- Backend API: `http://localhost:8000`
+- Flower Dashboard: `http://localhost:5555`
+
+### Option B: Manual Setup
+
+1. **Frontend Setup**
    ```bash
    cd web
    pnpm install
@@ -73,22 +88,26 @@ codeforge-ai/
    ```
    Frontend runs on `http://localhost:3000`
 
-3. **Backend Setup**
+2. **Backend Setup**
    ```bash
    cd backend
-   poetry install
+   pip install -r requirements.txt
    cp .env.example .env
-   # Edit .env with your API keys (OpenAI, Gemini, Supabase)
-   poetry run uvicorn app.main:app --reload
+   # Edit .env with your API keys
+   uvicorn app.main:app --reload
    ```
    Backend runs on `http://localhost:8000`
+
+3. **Celery Worker** (separate terminal)
+   ```bash
+   cd backend
+   celery -A app.workers.celery_app worker --loglevel=info
+   ```
 
 4. **Database Setup**
    ```bash
    cd database
-   # Initialize Supabase project
    supabase init
-   # Run migrations
    supabase db push
    ```
 
@@ -103,12 +122,29 @@ NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 
 ### Backend (.env)
 ```env
+# Supabase
 SUPABASE_URL=your_supabase_url
 SUPABASE_SERVICE_KEY=your_service_key
+SUPABASE_JWT_SECRET=your_jwt_secret
+
+# LLM Providers
 OPENAI_API_KEY=your_openai_key
 GOOGLE_API_KEY=your_gemini_key
 ANTHROPIC_API_KEY=your_claude_key
-DATABASE_URL=your_postgres_url
+
+# Redis & Celery
+REDIS_URL=redis://localhost:6379/0
+CELERY_BROKER_URL=redis://localhost:6379/0
+CELERY_RESULT_BACKEND=redis://localhost:6379/1
+
+# Security
+CSRF_SECRET=generate-a-random-secret
+ALLOWED_ORIGINS=http://localhost:3000
+
+# Optional
+GITHUB_APP_PRIVATE_KEY=your_github_private_key
+LOG_LEVEL=INFO
+ENVIRONMENT=development
 ```
 
 ## Development Workflow
@@ -122,24 +158,44 @@ pnpm lint                   # ESLint + Prettier
 
 # Backend (Python Agent Engine)
 cd backend
-poetry install              # Install dependencies
-poetry run uvicorn app.main:app --reload  # Starts on localhost:8000
-poetry run pytest           # Run tests
+pip install -r requirements.txt  # Install dependencies
+uvicorn app.main:app --reload    # Starts on localhost:8000
+pytest                           # Run tests (297 tests)
+
+# Celery Worker
+celery -A app.workers.celery_app worker --loglevel=info
+
+# Flower Monitoring
+celery -A app.workers.celery_app flower --port=5555
 ```
+
+## AI Agents
+
+| Agent | Model | Purpose |
+|---|---|---|
+| Research | GPT-4o | Requirements spec from one-liner ideas |
+| Wireframe | GPT-4o | Architecture spec (sitemap, components, state) |
+| Code | Gemini 1.5 Pro | Production code generation (1M token context) |
+| QA | GPT-4o | Code review with severity scoring |
+| Pedagogy | Claude 3.5 Sonnet | Socratic mentoring with choice frameworks |
+| Roadmap | Claude 3.5 Sonnet | Personalized learning curriculum |
 
 ## Deployment
 
 - **Frontend**: Vercel (auto-deploy on push to `main`)
-- **Backend**: Railway/Render (containerized FastAPI)
+- **Backend**: Railway/Render (containerized FastAPI + Celery)
 - **Database**: Supabase (managed PostgreSQL)
+- **Redis**: Railway Redis or Upstash
 
 ## Documentation
 
+- [Product Requirements](docs/PRD.md)
 - [Tech Stack](docs/Tech_Stack.md)
-- [Backend Schema](docs/Backend_Schema.md)
+- [Backend Schema & API](docs/Backend_Schema.md)
 - [Frontend Guidelines](docs/Frontend_Guidelines.md)
 - [Implementation Details](docs/Implementation_Details.md)
 - [App Flow](docs/App_Flow.md)
+- [Backend Guide](backend/README_BACKEND.md)
 
 ## Contributing
 

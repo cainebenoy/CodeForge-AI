@@ -7,7 +7,7 @@ CodeForge AI is a **hybrid monorepo** with two distinct layers that must remain 
 - **Frontend (Next.js 14)**: Handles UI, auth, CRUD operations via Supabase
 - **Agent Engine (Python FastAPI)**: Executes long-running AI tasks with LLM orchestration
 
-Communication flows: `Next.js Server Actions → FastAPI → LLM Router → Supabase (realtime sync back to UI)`
+Communication flows: `Next.js Server Actions → FastAPI → Celery/Redis → LLM Router → Supabase (realtime sync back to UI)`
 
 ## Critical Development Patterns
 
@@ -48,7 +48,7 @@ class RequirementDoc(BaseModel):
     tech_stack: list[str]
 
 # Wrong: Free-form LLM JSON responses
-# Right: Use instructor library or LangChain Pydantic parser
+# Right: Use LangChain PydanticOutputParser + resilient_llm_call()
 ```
 
 ### 3. State Management Strategy
@@ -73,23 +73,25 @@ const useEditorStore = create((set) => ({
 
 ### 4. Real-Time Agent Progress
 
-Use Supabase Realtime to sync agent execution status without polling:
+Dual-channel real-time updates:
+
+1. **SSE Streaming** — `GET /v1/jobs/{job_id}/stream` for live progress events
+2. **Supabase Realtime** — Subscribe to `agent_jobs` and `projects` table changes
 
 ```typescript
-// Frontend subscribes to project updates
+// Frontend subscribes to agent job updates
 supabase
   .channel(`project:${id}`)
   .on('postgres_changes', 
+    { event: '*', schema: 'public', table: 'agent_jobs',
+      filter: `project_id=eq.${id}` },
+    (payload) => queryClient.invalidateQueries(['jobs', id])
+  )
+  .on('postgres_changes',
     { event: 'UPDATE', schema: 'public', table: 'projects' },
     (payload) => queryClient.invalidateQueries(['project', id])
   )
   .subscribe();
-
-// Backend updates trigger UI refresh
-await supabase.table('projects').update({
-  'status': 'building',
-  'requirements_spec': generated_spec
-}).eq('id', project_id)
 ```
 
 ## Security Requirements (MANDATORY)
@@ -166,9 +168,14 @@ await supabase.table('projects').update({
   /store                    # Zustand stores
 
 # Python Agent Engine (separate service)
-/agents                     # 4 agents: research, wireframe, code, pedagogy
-/models                     # Pydantic schemas
-/routers                    # FastAPI route handlers
+/app/agents                 # 6 agents: research, wireframe, code, qa, pedagogy, roadmap
+/app/agents/core            # LLM router, memory, resilience (circuit breaker)
+/app/agents/graph           # LangGraph workflows (state, nodes, workflows)
+/app/schemas                # Pydantic v2 schemas (protocol.py)
+/app/api/endpoints          # FastAPI route handlers
+/app/middleware             # CSRF, rate limiter, request tracking
+/app/services               # Database, validation, job queue, GitHub
+/app/workers                # Celery task queue (celery_app, tasks)
 ```
 
 ## Database Schema Key Points
@@ -184,41 +191,54 @@ unique(project_id, path)
 - `requirements_spec` (Research Agent)
 - `architecture_spec` (Wireframe Agent)
 
+**Agent Jobs**: Tracked in `agent_jobs` table with Supabase Realtime publication.
+- Status: `queued` → `running` → `completed`/`failed`/`cancelled`
+- Progress: 0-100%, result/error as JSONB
+
 **Row Level Security (RLS)**: All tables enforce user-based access. Never bypass RLS in application code.
 
 ## LLM Model Selection Strategy
 
-Use the **Model Router** pattern to optimize cost vs. capability:
+Use the **Model Router** pattern (`app/agents/core/llm.py`) to optimize cost vs. capability:
 
-- **Research & QA**: GPT-4o or Claude 3.5 Sonnet (high reasoning)
-- **Code Generation**: Gemini 1.5 Pro (large context ~1M tokens for full file awareness)
-- **Routing/Classification**: Gemini Flash or GPT-4o-mini (cheap, fast)
+| Agent | Model | Provider | Reason |
+|---|---|---|---|
+| Research | GPT-4o | OpenAI | High reasoning for requirements |
+| Wireframe | GPT-4o | OpenAI | Architecture design |
+| Code | Gemini 1.5 Pro | Google | 1M token context for full file awareness |
+| QA | GPT-4o | OpenAI | Code review reasoning |
+| Pedagogy | Claude 3.5 Sonnet | Anthropic | Socratic mentoring style |
+| Roadmap | Claude 3.5 Sonnet | Anthropic | Curriculum design |
 
 ```python
-# Example routing logic
-def get_optimal_model(task_type: str) -> str:
-    if task_type in ["research", "qa"]:
-        return "gpt-4o"
-    elif task_type == "code":
-        return "gemini-1.5-pro"
-    else:
-        return "gemini-flash"
+# Actual routing logic in llm.py
+MODEL_ROUTER = {
+    "research": ("gpt-4o", "openai"),
+    "wireframe": ("gpt-4o", "openai"),
+    "code": ("gemini-1.5-pro", "google"),
+    "qa": ("gpt-4o", "openai"),
+    "pedagogy": ("claude-3-5-sonnet", "anthropic"),
+    "roadmap": ("claude-3-5-sonnet", "anthropic"),
+}
 ```
 
 ## Critical Async Patterns
 
-**Agent jobs are long-running** (30s - 5min). Use FastAPI `BackgroundTasks` or Redis queue:
+**Agent jobs are long-running** (30s - 5min). Use **Celery + Redis** persistent task queue:
 
 ```python
-# POST /run-agent returns immediately with job_id
-@app.post("/run-agent")
-async def run_agent(request: AgentRequest, background_tasks: BackgroundTasks):
+# POST /run-agent dispatches to Celery, returns immediately
+@app.post("/v1/run-agent")
+async def run_agent(request: AgentRequest):
     job_id = str(uuid4())
-    background_tasks.add_task(execute_agent_workflow, job_id, request.project_id)
+    execute_agent_task.delay(job_id, request.project_id, request.agent_type)
     return {"job_id": job_id}
 ```
 
-Frontend polls job status or (preferred) subscribes to Supabase Realtime updates.
+- **Celery** dispatches to Redis broker, workers pick up tasks asynchronously
+- **`task_acks_late`** ensures no task loss on worker crashes
+- **BackgroundTasks** used as fallback if Celery unavailable
+- Frontend gets updates via SSE (`/v1/jobs/{job_id}/stream`) or Supabase Realtime
 
 ## Component Styling Rules
 
@@ -235,41 +255,52 @@ Use **semantic Tailwind tokens** for theme adaptivity (light/dark mode):
 **Agent Signal Colors** (use for UI feedback):
 - Research Agent: `text-amber-400` / `border-amber-400/20`
 - Wireframe Agent: `text-blue-400` / `border-blue-400/20`
-- Code Agent: `text-green-400` / `border-green-400/20`
-- Pedagogy Agent: `text-purple-400` / `border-purple-400/20`
+- Code Agent: `text-emerald-400` / `border-emerald-400/20`
+- QA Agent: `text-teal-400` / `border-teal-400/20`
+- Pedagogy Agent: `text-violet-400` / `border-violet-400/20`
+- Roadmap Agent: `text-rose-400` / `border-rose-400/20`
 
 ## Key Files to Reference
 
 - [`docs/Tech_Stack.md`](../docs/Tech_Stack.md) - Full architecture & LLM strategy
 - [`docs/Backend_Schema.md`](../docs/Backend_Schema.md) - Database schema & Pydantic models
 - [`docs/Frontend_Guidelines.md`](../docs/Frontend_Guidelines.md) - Component patterns & design system
-- [`docs/Implementation_Details.md`](../docs/Implementation_Details.md) - 10-week build roadmap
+- [`docs/Implementation_Details.md`](../docs/Implementation_Details.md) - Implementation progress & status
 - [`docs/App_Flow.md`](../docs/App_Flow.md) - User journeys & UI states
 
 ## Common Pitfalls to Avoid
 
 1. **Don't use client components by default** - RSC first, `'use client'` only when necessary
-2. **Don't trust raw LLM JSON** - Always enforce with Pydantic schemas
-3. **Don't poll for agent status** - Use Supabase Realtime subscriptions
+2. **Don't trust raw LLM JSON** - Always enforce with Pydantic schemas + PydanticOutputParser
+3. **Don't poll for agent status** - Use SSE streaming or Supabase Realtime subscriptions
 4. **Don't hardcode colors** - Use Tailwind semantic tokens (`bg-background`, `text-foreground`)
 5. **Don't bypass RLS** - Always use authenticated Supabase client
 6. **Don't create duplicate file paths** - Check unique constraint before inserting into `project_files`
+7. **Don't call LLMs without resilience** - Always wrap with `resilient_llm_call()` (circuit breaker + retry)
+8. **Don't skip input validation** - All endpoints use Pydantic v2 models with `extra='forbid'`
 
 ## Development Workflow
 
 ```bash
 # Frontend (Next.js)
-npm run dev                 # Starts on localhost:3000
-npm run build              # Production build
-npm run lint               # ESLint + Prettier
+pnpm dev                    # Starts on localhost:3000
+pnpm build                 # Production build
+pnpm lint                  # ESLint + Prettier
 
 # Backend (Python Agent Engine)
-poetry install             # Install dependencies
-uvicorn main:app --reload # Starts on localhost:8000
-pytest                     # Run tests
+pip install -r requirements.txt  # Install dependencies
+uvicorn app.main:app --reload    # Starts on localhost:8000
+pytest                           # Run tests (297 tests)
+
+# Celery Worker (separate terminal)
+celery -A app.workers.celery_app worker --loglevel=info
+
+# Docker Compose (all services)
+docker-compose up --build  # Redis + FastAPI + Celery + Flower
 ```
 
 **Deployment**:
 - Frontend → Vercel (auto-deploy on push to `main`)
-- Backend → Railway/Render (containerized FastAPI)
+- Backend → Railway/Render (containerized FastAPI + Celery worker)
 - Database → Supabase (managed PostgreSQL)
+- Redis → Railway Redis or Upstash

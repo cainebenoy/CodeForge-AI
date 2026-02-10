@@ -94,17 +94,26 @@ We use **Semantic CSS Variables** (via Shadcn/Tailwind) to support two distinct 
 | `text-foreground` | `zinc-900` | `zinc-50` | Primary text. |
 | `text-muted-foreground` | `zinc-500` | `zinc-400` | Secondary text, metadata. |
 
-**Signal Colors (Agents):***Adjust luminance for readability on light backgrounds.*
+**Signal Colors (Agents):** *Adjust luminance for readability on light backgrounds.*
 
 - **Research Agent (Amber):**
     - Dark: `text-amber-400` / `border-amber-400/20`
     - Light: `text-amber-600` / `border-amber-600/20`
+- **Wireframe Agent (Blue):**
+    - Dark: `text-blue-400` / `border-blue-400/20`
+    - Light: `text-blue-600` / `border-blue-600/20`
 - **Code Agent (Emerald):**
     - Dark: `text-emerald-400` / `border-emerald-400/20`
     - Light: `text-emerald-600` / `border-emerald-600/20`
+- **QA Agent (Teal):**
+    - Dark: `text-teal-400` / `border-teal-400/20`
+    - Light: `text-teal-600` / `border-teal-600/20`
 - **Pedagogy Agent (Violet):**
     - Dark: `text-violet-400` / `border-violet-400/20`
     - Light: `text-violet-600` / `border-violet-600/20`
+- **Roadmap Agent (Rose):**
+    - Dark: `text-rose-400` / `border-rose-400/20`
+    - Light: `text-rose-600` / `border-rose-600/20`
 
 ### 4.2 Visual Hierarchy (Borders > Shadows)
 
@@ -138,7 +147,7 @@ Use Zustand for UI state that persists across components but doesn't need to be 
 
 - `activeFile`: string | null (Path of currently open file in editor)
 - `isSidebarOpen`: boolean
-- `activeAgent`: 'research' | 'wireframe' | 'code' | 'qa'
+- `activeAgent`: 'research' | 'wireframe' | 'code' | 'qa' | 'pedagogy' | 'roadmap'
 - `generatedFiles`: Record<string, string> (The virtual file system)
 
 ### 5.2 Server State (TanStack Query)
