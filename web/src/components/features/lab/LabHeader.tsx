@@ -3,15 +3,32 @@
 import Link from 'next/link'
 import { Code2, Bell, HelpCircle, User, Clock } from 'lucide-react'
 import { ThemeToggle } from '@/components/shared/ThemeToggle'
+import { useUser } from '@/lib/hooks/use-user'
+
+export interface LabHeaderProps {
+  /** Project title for breadcrumb */
+  projectTitle?: string
+  /** Current module title */
+  moduleTitle?: string
+  /** Module progress percentage (0-100) */
+  moduleProgress?: number
+}
 
 /**
  * LabHeader — Top navigation for the Module Lab page.
  *
- * **Dark**: Logo + breadcrumb trail (Student Mode / Modules / task),
- *           notifications, help, avatar.
- * **Light**: Logo + module name with progress bar + timer, help, avatar.
+ * Accepts optional dynamic props from the lab page. Falls back to demo content.
  */
-export function LabHeader() {
+export function LabHeader({
+  projectTitle,
+  moduleTitle,
+  moduleProgress,
+}: LabHeaderProps) {
+  const { user } = useUser()
+  const initials = user?.user_metadata?.full_name
+    ? user.user_metadata.full_name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
+    : user?.email?.slice(0, 2).toUpperCase() ?? 'JD'
+  const avatarUrl = user?.user_metadata?.avatar_url
   return (
     <header
       className="h-14 shrink-0 z-10 border-b flex items-center justify-between px-4 sm:px-6
@@ -41,19 +58,19 @@ export function LabHeader() {
             Modules
           </Link>
           <span className="text-zinc-600">/</span>
-          <span className="text-violet-500 font-medium">Database Indexing</span>
+          <span className="text-violet-500 font-medium">{moduleTitle ?? 'Database Indexing'}</span>
         </nav>
 
         {/* Light module + progress */}
         <div className="flex dark:hidden flex-col justify-center">
           <h1 className="text-sm font-semibold text-foreground leading-tight">
-            Module 1: Intro to Python
+            {moduleTitle ?? 'Module 1: Intro to Python'}
           </h1>
           <div className="flex items-center gap-2">
             <div className="h-1.5 w-24 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-blue-600 w-[35%] rounded-full" />
+              <div className="h-full bg-blue-600 rounded-full" style={{ width: `${moduleProgress ?? 35}%` }} />
             </div>
-            <span className="text-[10px] text-muted-foreground font-medium">35% Complete</span>
+            <span className="text-[10px] text-muted-foreground font-medium">{Math.round(moduleProgress ?? 35)}% Complete</span>
           </div>
         </div>
       </div>
@@ -87,9 +104,17 @@ export function LabHeader() {
 
         {/* Avatar */}
         <div className="dark:border-zinc-700 border-border border rounded-full">
-          <div className="size-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold dark:text-violet-500 text-muted-foreground">
-            JD
-          </div>
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="User avatar"
+              className="size-8 rounded-full object-cover"
+            />
+          ) : (
+            <div className="size-8 rounded-full bg-muted flex items-center justify-center text-xs font-bold dark:text-violet-500 text-muted-foreground">
+              {initials}
+            </div>
+          )}
         </div>
       </div>
     </header>

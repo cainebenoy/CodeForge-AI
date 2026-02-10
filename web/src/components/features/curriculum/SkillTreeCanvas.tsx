@@ -15,6 +15,17 @@ import {
   Smartphone,
 } from 'lucide-react'
 
+import type { LearningModule } from '@/types/api.types'
+
+export interface SkillTreeCanvasProps {
+  /** API modules for dynamic rendering; falls back to demo layout */
+  modules?: LearningModule[]
+  /** Currently active module index */
+  currentModuleIndex?: number
+  /** Number of completed modules */
+  completedModules?: number
+}
+
 /* ═══════════════════════════════════════════
    DARK-MODE CANVAS — Circular nodes + SVG
    ═══════════════════════════════════════════ */
@@ -339,7 +350,11 @@ function LightCard({
 /* ═══════════════════════════════════════════
    PUBLIC EXPORT
    ═══════════════════════════════════════════ */
-export function SkillTreeCanvas() {
+export function SkillTreeCanvas({
+  modules,
+  currentModuleIndex,
+  completedModules,
+}: SkillTreeCanvasProps) {
   return (
     <>
       <div className="hidden dark:flex flex-1 min-h-0">

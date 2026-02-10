@@ -75,8 +75,8 @@
   /* Dark-mode glass panel for terminal */
   .glass-panel {
     background: rgba(255, 255, 255, 0.03);
-    backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
     border: 1px solid rgba(255, 255, 255, 0.08);
     box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
   }
@@ -128,8 +128,8 @@
   /* Light-mode glass panel (AI sidebar) */
   .glass-panel-light {
     background: rgba(255, 255, 255, 0.85);
-    backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
   }
 }
 

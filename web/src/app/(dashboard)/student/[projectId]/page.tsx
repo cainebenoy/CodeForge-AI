@@ -1,22 +1,95 @@
+'use client'
+
+import { useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChoiceModal } from '@/components/features/student'
+import { useChoiceFramework, useSelectChoice, useStudentProgress } from '@/lib/hooks/use-student'
+import { useProject } from '@/lib/hooks/use-project'
+import { Loader2 } from 'lucide-react'
 import {
   Code2,
   MoreHorizontal,
   Database as DbIcon,
   FileCode,
 } from 'lucide-react'
+import type { ChoiceOption } from '@/components/features/student'
 
 /**
  * Student Choice page — overlay modal for architecture / pattern decisions.
  *
- * DARK layout : Dimmed background (nav + mentor chat + code editor) with a centred glass-panel modal.
- * LIGHT layout: Plain background with the white paper modal centred.
+ * Fetches choice framework from the API when a decision context is provided,
+ * falls back to demo data in the ChoiceModal when API data is unavailable.
  */
 export default function StudentProjectPage({
   params,
 }: {
   params: { projectId: string }
 }) {
+  const router = useRouter()
+  const { data: project } = useProject(params.projectId)
+  const { data: progress } = useStudentProgress(params.projectId)
+  const choiceFramework = useChoiceFramework(params.projectId)
+  const selectChoice = useSelectChoice(params.projectId)
+
+  const [choiceData, setChoiceData] = useState<{
+    context: string
+    options: ChoiceOption[]
+    recommendation?: string
+  } | null>(null)
+
+  // Map API ImplementationOption[] → UI ChoiceOption[]
+  const mapApiOptions = useCallback(
+    (apiOptions: Array<{
+      id: string; title: string; description: string;
+      difficulty: string; pros: string[]; cons: string[];
+      estimated_time: string;
+    }>, recommendation?: string): ChoiceOption[] => {
+      const iconPool: Array<'bolt' | 'flame' | 'database' | 'layers' | 'bell' | 'git'> =
+        ['bolt', 'flame', 'database', 'layers', 'bell', 'git']
+      const accentPool = ['primary', 'orange', 'red']
+
+      return apiOptions.map((opt, i) => {
+        const isRecommended = recommendation === opt.id
+        return {
+          id: opt.id,
+          title: opt.title,
+          description: opt.description,
+          icon: iconPool[i % iconPool.length],
+          features: opt.pros.slice(0, 3),
+          badge: isRecommended ? 'Recommended' : undefined,
+          badgeVariant: isRecommended ? 'recommended' as const : undefined,
+          accent: accentPool[i % accentPool.length],
+          xpLabel: 'Est. Time',
+          xpAmount: opt.estimated_time,
+          difficulty: opt.difficulty,
+          difficultyPercent: opt.difficulty === 'beginner' ? 25
+            : opt.difficulty === 'intermediate' ? 50
+            : opt.difficulty === 'advanced' ? 75 : 90,
+        }
+      })
+    },
+    [],
+  )
+
+  const handleSelect = useCallback(
+    async (optionId: string) => {
+      const moduleIndex = progress?.current_module ?? 0
+      selectChoice.mutate(
+        { module_index: moduleIndex, option_id: optionId },
+        {
+          onSuccess: () => {
+            router.push(`/lab/${params.projectId}`)
+          },
+        },
+      )
+    },
+    [selectChoice, progress, params.projectId, router],
+  )
+
+  const handleCancel = useCallback(() => {
+    router.push(`/curriculum`)
+  }, [router])
+
   return (
     <div className="relative h-screen overflow-hidden bg-background text-foreground flex flex-col">
       {/* ════════════════════════════════════════════════
@@ -133,7 +206,14 @@ export default function StudentProjectPage({
                    dark:bg-background/60 dark:backdrop-blur-sm
                    bg-muted"
       >
-        <ChoiceModal />
+        <ChoiceModal
+          projectId={params.projectId}
+          apiOptions={choiceData?.options}
+          title={choiceData?.context}
+          onConfirm={handleSelect}
+          onCancel={handleCancel}
+          isSubmitting={selectChoice.isPending}
+        />
       </div>
     </div>
   )

@@ -1,25 +1,97 @@
+'use client'
+
+import { useMemo, useCallback } from 'react'
 import Link from 'next/link'
-import { Code2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { Code2, Loader2 } from 'lucide-react'
 import { ThemeToggle } from '@/components/shared/ThemeToggle'
 import {
   AgentReasoningAccordion,
   ProgressSummaryCards,
 } from '@/components/features/reasoning'
+import type { ReasoningStep, TerminalLogLine, SummaryCardData } from '@/components/features/reasoning'
+import { useProjectJobs, useJobStatus } from '@/lib/hooks/use-agents'
+import { useProject } from '@/lib/hooks/use-project'
+import { useProjectRealtime } from '@/lib/hooks/use-realtime'
+import { Database, Globe, Shield } from 'lucide-react'
+import type { JobStatus } from '@/types/api.types'
+
+/**
+ * Maps a backend JobStatus to the UI ReasoningStep format.
+ */
+function jobsToSteps(jobs: JobStatus[]): ReasoningStep[] {
+  return jobs.map((job) => {
+    const status: ReasoningStep['status'] =
+      job.status === 'completed' ? 'completed'
+      : job.status === 'running' ? 'active'
+      : job.status === 'failed' ? 'completed'
+      : 'pending'
+
+    const elapsed = job.completed_at && job.created_at
+      ? `${((new Date(job.completed_at).getTime() - new Date(job.created_at).getTime()) / 1000).toFixed(2)}s`
+      : job.status === 'running' ? `${job.progress}%`
+      : undefined
+
+    return {
+      id: job.job_id,
+      label: `${job.agent_type.charAt(0).toUpperCase() + job.agent_type.slice(1)} Agent`,
+      description: job.error ?? undefined,
+      status,
+      time: elapsed,
+      subLines: job.status === 'running'
+        ? [`Processing... (${job.progress}% complete)`]
+        : undefined,
+    }
+  })
+}
+
+function jobsToSummaryCards(jobs: JobStatus[]): SummaryCardData[] {
+  const agentIcons: Record<string, React.ReactNode> = {
+    research: <Globe className="size-5" />,
+    wireframe: <Database className="size-5" />,
+    code: <Shield className="size-5" />,
+    qa: <Shield className="size-5" />,
+  }
+
+  return jobs
+    .filter((j) => j.status === 'completed' && j.result)
+    .slice(0, 3)
+    .map((job) => ({
+      icon: agentIcons[job.agent_type] ?? <Globe className="size-5" />,
+      title: `${job.agent_type.charAt(0).toUpperCase() + job.agent_type.slice(1)}`,
+      description: job.result
+        ? typeof job.result === 'object' && 'summary' in (job.result as Record<string, unknown>)
+          ? String((job.result as Record<string, unknown>).summary).slice(0, 80)
+          : 'Completed successfully.'
+        : 'Pending.',
+    }))
+}
 
 /**
  * Project Generation Status page.
  *
- * **Dark**: Full page with header, title area ("Project Generation Status"),
- *           Agent Reasoning accordion (terminal-style), and progress summary cards.
- * **Light**: Centred standalone Agent Reasoning accordion (stepper-style).
- *
- * Route: /dashboard/project/[projectId]
+ * Fetches live job data for the project and maps it to the agent reasoning UI.
+ * Falls back to demo data when API is unavailable.
  */
 export default function ProjectStatusPage({
   params,
 }: {
   params: { projectId: string }
 }) {
+  const { data: project } = useProject(params.projectId)
+  const { data: jobsData, isLoading } = useProjectJobs(params.projectId)
+
+  // Real-time: auto-refresh when agent jobs or project change
+  useProjectRealtime(params.projectId)
+
+  const jobs = jobsData?.items ?? []
+
+  const darkSteps = useMemo(() => (jobs.length > 0 ? jobsToSteps(jobs) : undefined), [jobs])
+  const lightSteps = useMemo(() => (jobs.length > 0 ? jobsToSteps(jobs) : undefined), [jobs])
+  const summaryCards = useMemo(() => (jobs.length > 0 ? jobsToSummaryCards(jobs) : undefined), [jobs])
+
+  const isProcessing = jobs.some((j) => j.status === 'running' || j.status === 'queued')
+
   return (
     <>
       {/* ══════════════════════════════════
@@ -66,9 +138,11 @@ export default function ProjectStatusPage({
             <div className="flex flex-col gap-2 px-4">
               <div className="flex items-center gap-3">
                 <h1 className="text-foreground tracking-tight text-[32px] font-bold leading-tight">
-                  Project Generation Status
+                  {project?.title ? `${project.title} — Status` : 'Project Generation Status'}
                 </h1>
-                <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(236,164,19,0.6)]" />
+                {isProcessing && (
+                  <span className="flex h-2 w-2 rounded-full bg-amber-400 animate-pulse shadow-[0_0_8px_rgba(236,164,19,0.6)]" />
+                )}
               </div>
               <p className="text-muted-foreground text-sm max-w-2xl">
                 Real-time monitoring of the autonomous agent as it constructs
@@ -78,8 +152,19 @@ export default function ProjectStatusPage({
 
             {/* Reasoning accordion + summary cards */}
             <div className="flex flex-col px-4 gap-6">
-              <AgentReasoningAccordion />
-              <ProgressSummaryCards />
+              {isLoading ? (
+                <div className="flex items-center justify-center py-20">
+                  <Loader2 className="size-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <>
+                  <AgentReasoningAccordion
+                    darkSteps={darkSteps}
+                    lightSteps={lightSteps}
+                  />
+                  <ProgressSummaryCards cards={summaryCards} />
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -90,7 +175,16 @@ export default function ProjectStatusPage({
          ══════════════════════════════════ */}
       <div className="flex dark:hidden items-center justify-center min-h-screen bg-background p-4 sm:p-6 lg:p-8">
         <div className="w-full max-w-3xl">
-          <AgentReasoningAccordion />
+          {isLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="size-8 animate-spin text-muted-foreground" />
+            </div>
+          ) : (
+            <AgentReasoningAccordion
+              lightSteps={lightSteps}
+              darkSteps={darkSteps}
+            />
+          )}
         </div>
       </div>
     </>

@@ -9,6 +9,8 @@ import {
   Circle,
   ListChecks,
 } from 'lucide-react'
+import type { LearningModule } from '@/types/api.types'
+import type { StudentProgress } from '@/types/api.types'
 
 /* ─── Types ─── */
 interface Objective {
@@ -31,6 +33,19 @@ const lightObjectives: Objective[] = [
   { label: 'Implicit Grids', sublabel: 'Auto-placement algorithms', status: 'pending' },
 ]
 
+export interface ModuleSidebarProps {
+  /** API module data; falls back to demo */
+  module?: LearningModule
+  /** Index of the current module */
+  moduleIndex?: number
+  /** Active project ID */
+  projectId?: string
+  /** Student progress data */
+  progress?: StudentProgress
+  /** Called when Launch Lab is clicked */
+  onLaunchLab?: () => void
+}
+
 /**
  * ModuleSidebar — Right sidebar showing module details for
  * the currently-selected skill tree node.
@@ -40,7 +55,42 @@ const lightObjectives: Objective[] = [
  * **Light**: White panel — module/level badges, title, stats row,
  *            objectives list, prerequisites, "LAUNCH LAB" CTA.
  */
-export function ModuleSidebar() {
+export function ModuleSidebar({
+  module,
+  moduleIndex = 0,
+  projectId,
+  progress,
+  onLaunchLab,
+}: ModuleSidebarProps) {
+  // Derive objectives from API module steps, or use demo data
+  const derivedDarkObjectives: Objective[] = module?.steps
+    ? module.steps.map((step, i) => ({
+        label: step.title,
+        status: i < (progress?.completed_modules ?? 0)
+          ? 'completed' as const
+          : i === (progress?.current_module ?? 0)
+            ? 'active' as const
+            : 'pending' as const,
+      }))
+    : darkObjectives
+
+  const derivedLightObjectives: Objective[] = module?.steps
+    ? module.steps.map((step, i) => ({
+        label: step.title,
+        sublabel: step.description,
+        status: i < (progress?.completed_modules ?? 0)
+          ? 'completed' as const
+          : i === (progress?.current_module ?? 0)
+            ? 'active' as const
+            : 'pending' as const,
+      }))
+    : lightObjectives
+
+  const moduleTitle = module?.title ?? 'React Foundations'
+  const moduleDesc = module?.description ?? 'Frontend Engineering • Unit 3'
+  const estimatedTime = module?.estimated_hours
+    ? `${Math.floor(module.estimated_hours)}h ${Math.round((module.estimated_hours % 1) * 60)}m`
+    : '2h 45m'
   return (
     <>
       {/* ── Dark sidebar ── */}
@@ -54,10 +104,10 @@ export function ModuleSidebar() {
             </span>
           </div>
           <h2 className="text-2xl font-bold text-foreground mb-1">
-            React Foundations
+            {moduleTitle}
           </h2>
           <p className="text-muted-foreground text-sm">
-            Frontend Engineering • Unit 3
+            {moduleDesc}
           </p>
         </div>
 
@@ -82,7 +132,7 @@ export function ModuleSidebar() {
                 <Clock className="size-4" />
                 <span className="text-xs font-medium">Est. Time</span>
               </div>
-              <span className="text-foreground font-mono font-bold">2h 45m</span>
+              <span className="text-foreground font-mono font-bold">{estimatedTime}</span>
             </div>
             <div className="bg-zinc-900/50 border border-border/30 rounded-lg p-3">
               <div className="flex items-center gap-2 text-muted-foreground mb-1">
@@ -99,7 +149,7 @@ export function ModuleSidebar() {
               Objectives
             </h3>
             <div className="space-y-3">
-              {darkObjectives.map((obj) => (
+              {derivedDarkObjectives.map((obj) => (
                 <div key={obj.label} className="flex gap-3 items-start">
                   <div
                     className={`mt-0.5 size-5 rounded-full flex items-center justify-center shrink-0 ${
@@ -143,7 +193,10 @@ export function ModuleSidebar() {
 
         {/* Footer CTA */}
         <div className="p-6 border-t border-border/30 bg-zinc-950">
-          <button className="w-full h-12 bg-cf-primary hover:brightness-110 text-black font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-[0_0_20px_rgba(19,236,109,0.2)] hover:shadow-[0_0_30px_rgba(19,236,109,0.4)]">
+          <button
+            onClick={onLaunchLab}
+            className="w-full h-12 bg-cf-primary hover:brightness-110 text-black font-bold rounded-lg flex items-center justify-center gap-2 transition-all shadow-[0_0_20px_rgba(19,236,109,0.2)] hover:shadow-[0_0_30px_rgba(19,236,109,0.4)]"
+          >
             <Rocket className="size-5" />
             Launch Lab Environment
           </button>
@@ -159,17 +212,17 @@ export function ModuleSidebar() {
         <div className="p-6 border-b border-border/50">
           <div className="flex items-center gap-2 mb-2">
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-violet-600/10 text-violet-600 uppercase tracking-wider">
-              Module 2.4
+              Module {(moduleIndex ?? 0) + 1}
             </span>
             <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 uppercase tracking-wider">
               Intermediate
             </span>
           </div>
           <h2 className="text-2xl font-bold text-foreground leading-tight">
-            CSS Grid Systems
+            {moduleTitle}
           </h2>
           <p className="text-sm text-muted-foreground mt-2">
-            Learn how to build complex web layouts with 2-dimensional grid systems.
+            {moduleDesc}
           </p>
         </div>
 
@@ -196,7 +249,7 @@ export function ModuleSidebar() {
             Objectives
           </h3>
           <ul className="space-y-3">
-            {lightObjectives.map((obj) => (
+            {derivedLightObjectives.map((obj) => (
               <li key={obj.label} className="flex items-start gap-3 group">
                 <div className="mt-0.5">
                   {obj.status === 'completed' && (
@@ -249,7 +302,10 @@ export function ModuleSidebar() {
 
         {/* Footer CTA */}
         <div className="p-6 border-t border-border bg-muted/30">
-          <button className="w-full bg-foreground hover:bg-foreground/90 text-white font-bold py-3.5 px-4 rounded-sm flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-xl active:scale-[0.98]">
+          <button
+            onClick={onLaunchLab}
+            className="w-full bg-foreground hover:bg-foreground/90 text-white font-bold py-3.5 px-4 rounded-sm flex items-center justify-center gap-2 transition-all shadow-lg hover:shadow-xl active:scale-[0.98]"
+          >
             <Rocket className="size-5" />
             LAUNCH LAB
           </button>

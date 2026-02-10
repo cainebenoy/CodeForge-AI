@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Flag, Lightbulb, Check } from 'lucide-react'
+import type { LearningModule } from '@/types/api.types'
 
 /* ─── Dark objectives ─── */
 const darkObjectives = [
@@ -19,15 +20,17 @@ const darkCriteria = [
 /* ─── Light tabs ─── */
 const tabs = ['Instructions', 'Hints', 'Resources'] as const
 
+export interface InstructionPanelProps {
+  /** API module data for dynamic objectives; falls back to demo */
+  module?: LearningModule
+}
+
 /**
  * InstructionPanel — Left sidebar in the Module Lab.
  *
- * **Dark**: Title, description with inline `code`, numbered objectives in a
- *           code-block card, success-criteria checkboxes.
- * **Light**: Task header with tabs (Instructions / Hints / Resources),
- *            prose description, math definition card, example I/O, tip callout.
+ * Accepts optional module data from the API. Falls back to demo content.
  */
-export function InstructionPanel() {
+export function InstructionPanel({ module }: InstructionPanelProps) {
   const [activeTab, setActiveTab] = useState<(typeof tabs)[number]>('Instructions')
   const [criteria, setCriteria] = useState(darkCriteria)
 
@@ -52,13 +55,13 @@ export function InstructionPanel() {
         <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6">
           {/* Title + description */}
           <div>
-            <h1 className="text-2xl font-bold text-foreground mb-2">Database Indexing</h1>
+            <h1 className="text-2xl font-bold text-foreground mb-2">{module?.title ?? 'Database Indexing'}</h1>
             <p className="text-muted-foreground text-sm leading-relaxed">
-              Optimize query performance by implementing a B-Tree index on the{' '}
+              {module?.description ?? (<>Optimize query performance by implementing a B-Tree index on the{' '}
               <code className="bg-zinc-800 text-zinc-200 px-1 py-0.5 rounded text-xs font-mono">
                 users
               </code>{' '}
-              table. The current query scan is taking too long on the email column.
+              table. The current query scan is taking too long on the email column.</>)}
             </p>
           </div>
 
@@ -69,11 +72,12 @@ export function InstructionPanel() {
               Objectives
             </h4>
             <div className="bg-zinc-900/50 rounded border border-zinc-800 p-4 font-mono text-xs text-zinc-300 space-y-2">
-              {darkObjectives.map((obj) => {
-                const [num, ...rest] = obj.split(' ')
+              {(module?.objectives ?? darkObjectives).map((obj, i) => {
+                const text = typeof obj === 'string' ? obj : String(obj)
+                const [num, ...rest] = text.split(' ')
                 return (
-                  <p key={obj} className="flex items-start gap-2">
-                    <span className="text-zinc-600">{num}</span> {rest.join(' ')}
+                  <p key={text} className="flex items-start gap-2">
+                    <span className="text-zinc-600">{module ? `${String(i + 1).padStart(2, '0')}.` : num}</span> {module ? text : rest.join(' ')}
                   </p>
                 )
               })}

@@ -4,13 +4,25 @@ import Link from 'next/link'
 import { Code2, User, Bell, Star, Award } from 'lucide-react'
 import { ThemeToggle } from '@/components/shared/ThemeToggle'
 
+export interface SkillTreeHeaderProps {
+  /** Curriculum progress percentage (0-100) */
+  progress?: number
+  /** Current level */
+  level?: number
+  /** Current XP */
+  xp?: number
+}
+
 /**
  * SkillTreeHeader — Top nav for the Skill Tree / Curriculum page.
  *
- * **Dark**: CodeForge logo, Path/Projects/Community nav, curriculum progress bar, rank badge, profile.
- * **Light**: CodeForge logo + path label, progress %, Level/XP badge, notifications, avatar.
+ * Accepts optional progress/level/XP from API, falling back to defaults.
  */
-export function SkillTreeHeader() {
+export function SkillTreeHeader({
+  progress = 45,
+  level = 4,
+  xp = 2400,
+}: SkillTreeHeaderProps) {
   return (
     <header className="h-16 shrink-0 z-50 border-b flex items-center justify-between px-6
                         dark:border-border/30 dark:bg-zinc-950/90 dark:backdrop-blur-sm
@@ -57,9 +69,9 @@ export function SkillTreeHeader() {
           </span>
           <div className="flex items-center gap-2">
             <div className="w-32 h-2 bg-muted rounded-full overflow-hidden">
-              <div className="h-full bg-foreground w-[45%] rounded-full" />
+              <div className="h-full bg-foreground rounded-full" style={{ width: `${progress}%` }} />
             </div>
-            <span className="text-xs font-bold text-foreground">45%</span>
+            <span className="text-xs font-bold text-foreground">{progress}%</span>
           </div>
         </div>
       </div>
@@ -71,10 +83,10 @@ export function SkillTreeHeader() {
           <div className="flex flex-col items-end gap-1">
             <div className="flex items-center gap-2">
               <span className="text-xs font-mono text-muted-foreground">CURRICULUM PROGRESS</span>
-              <span className="text-xs font-mono text-cf-primary font-bold">45%</span>
+              <span className="text-xs font-mono text-cf-primary font-bold">{progress}%</span>
             </div>
             <div className="w-32 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
-              <div className="h-full bg-cf-primary w-[45%] shadow-[0_0_10px_rgba(19,236,109,0.5)]" />
+              <div className="h-full bg-cf-primary shadow-[0_0_10px_rgba(19,236,109,0.5)]" style={{ width: `${progress}%` }} />
             </div>
           </div>
           <div className="flex items-center gap-2 bg-secondary border border-border px-3 py-1.5 rounded-lg">
@@ -86,8 +98,8 @@ export function SkillTreeHeader() {
         {/* Light level badge */}
         <div className="flex dark:hidden items-center gap-2 px-3 py-1 bg-muted/50 rounded border border-border">
           <Star className="size-3.5 text-violet-600" />
-          <span className="text-sm font-bold text-foreground">Level 4</span>
-          <span className="text-xs text-muted-foreground font-medium">2400 XP</span>
+          <span className="text-sm font-bold text-foreground">Level {level}</span>
+          <span className="text-xs text-muted-foreground font-medium">{xp} XP</span>
         </div>
 
         <ThemeToggle />

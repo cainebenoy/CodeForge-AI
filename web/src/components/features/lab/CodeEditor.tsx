@@ -148,7 +148,7 @@ export function CodeEditor() {
               onClick={() => setLightActive(i)}
               className={`flex items-center gap-2 px-4 py-2 text-xs font-medium transition-colors ${
                 i === lightActive
-                  ? 'bg-white border-t border-l border-r border-border rounded-t-sm text-foreground relative top-[1px] border-t-2 border-t-blue-600'
+                  ? 'bg-white border-t-2 border-t-blue-600 border-l border-r border-border rounded-t-sm text-foreground relative top-[1px]'
                   : 'border border-transparent rounded-t-sm text-muted-foreground hover:bg-muted mb-[1px]'
               }`}
             >

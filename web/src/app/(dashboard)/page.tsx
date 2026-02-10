@@ -1,3 +1,6 @@
+'use client'
+
+import { useState } from 'react'
 import {
   Plus,
   Upload,
@@ -6,114 +9,95 @@ import {
   List,
   Server,
   GraduationCap,
-  Bot,
-  Globe,
-  BarChart3,
-  Palette,
-  Wrench,
   Code,
-  TerminalSquare,
-  Database,
-  Brush,
-  Layers,
+  Loader2,
+  AlertCircle,
+  type LucideIcon,
 } from 'lucide-react'
 import {
   ProjectCard,
   type ProjectCardProps,
 } from '@/components/features/dashboard/ProjectCard'
 import { CreateProjectCard } from '@/components/features/dashboard/CreateProjectCard'
+import { CreateProjectModal } from '@/components/features/dashboard/CreateProjectModal'
+import { useProjects } from '@/lib/hooks/use-project'
+import { useDashboardRealtime } from '@/lib/hooks/use-realtime'
+import type { Project, ProjectMode } from '@/types/api.types'
 
 /* ─────────────────────────────────────────────
- * Demo data – will be replaced by Supabase query
+ * Map API Project → UI ProjectCardProps
  * ───────────────────────────────────────────── */
-const projects: ProjectCardProps[] = [
-  {
-    id: 'ecommerce-backend',
-    title: 'E-commerce Dashboard',
-    description:
-      'React-based admin panel for managing inventory, orders, and customer analytics.',
-    mode: 'builder',
-    editedAt: '2h ago',
-    gradient: 'from-blue-500 to-indigo-600',
-    icon: Server,
-    status: 'Development',
-    slug: 'codeforge/ecommerce-v2',
-    avatarColors: ['bg-blue-500', 'bg-indigo-500'],
-    techIcons: [Code, TerminalSquare],
-  },
-  {
-    id: 'ai-chatbot',
-    title: 'AI Chatbot Interface',
-    description:
-      'Client-facing chat interface powered by GPT-4 with streaming response support.',
-    mode: 'builder',
-    editedAt: '1d ago',
-    gradient: 'from-emerald-400 to-green-600',
-    icon: Bot,
-    status: 'Production',
-    slug: 'codeforge/ai-chat-ui',
-    avatarColors: ['bg-green-500'],
-    techIcons: [Database, Code],
-  },
-  {
-    id: 'react-basics',
-    title: 'React Basics Course',
-    description:
-      'Learning materials and exercises for React hooks, state management, and component lifecycles.',
-    mode: 'student',
-    editedAt: '1d ago',
-    gradient: 'from-violet-500 to-fuchsia-500',
-    icon: GraduationCap,
-    status: 'Development',
-    slug: 'codeforge/react-basics',
-    avatarColors: ['bg-pink-500'],
-    techIcons: [Code, Layers],
-  },
-  {
-    id: 'internal-tools-api',
-    title: 'Internal Tools API',
-    description:
-      'Legacy API service for employee directory and asset management.',
-    mode: 'builder',
-    editedAt: '5d ago',
-    gradient: 'from-amber-400 to-orange-500',
-    icon: Wrench,
-    status: 'Paused',
-    slug: 'codeforge/internal-api',
-    avatarColors: ['bg-amber-500'],
-    techIcons: [Database],
-  },
-  {
-    id: 'portfolio-site-v2',
-    title: 'Portfolio Site v2',
-    description:
-      'Redesigning personal portfolio using Next.js 14 and Tailwind CSS components.',
-    mode: 'student',
-    editedAt: '5d ago',
-    gradient: 'from-purple-500 to-pink-500',
-    icon: Palette,
-    status: 'Planning',
-    slug: 'codeforge/cosmos-ds',
-    avatarColors: ['bg-orange-500', 'bg-purple-500'],
-    techIcons: [Brush, Layers],
-  },
-  {
-    id: 'sales-dashboard',
-    title: 'Marketing Website',
-    description:
-      'Main landing page with Framer Motion animations and CMS integration.',
-    mode: 'builder',
-    editedAt: '1w ago',
-    gradient: 'from-cyan-400 to-blue-500',
-    icon: Globe,
-    status: 'In Review',
-    slug: 'codeforge/www',
-    avatarColors: ['bg-teal-500'],
-    techIcons: [Layers],
-  },
-]
+const modeIcons: Record<ProjectMode, LucideIcon> = {
+  builder: Server,
+  student: GraduationCap,
+}
 
+const modeGradients: Record<ProjectMode, string> = {
+  builder: 'from-blue-500 to-indigo-600',
+  student: 'from-violet-500 to-fuchsia-500',
+}
+
+const statusMap: Record<string, ProjectCardProps['status']> = {
+  planning: 'Planning',
+  'in-progress': 'Development',
+  building: 'Development',
+  completed: 'Production',
+  archived: 'Paused',
+}
+
+function formatTimeAgo(dateString: string): string {
+  const diff = Date.now() - new Date(dateString).getTime()
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  if (days < 7) return `${days}d ago`
+  const weeks = Math.floor(days / 7)
+  return `${weeks}w ago`
+}
+
+function toCardProps(project: Project): ProjectCardProps {
+  return {
+    id: project.id,
+    title: project.title,
+    description: project.description || 'No description provided.',
+    mode: project.mode,
+    editedAt: formatTimeAgo(project.updated_at),
+    gradient: modeGradients[project.mode],
+    icon: modeIcons[project.mode],
+    status: statusMap[project.status] ?? 'Development',
+    avatarColors: project.mode === 'builder' ? ['bg-blue-500'] : ['bg-violet-500'],
+    techIcons: [Code],
+  }
+}
+
+/* ─────────────────────────────────────────────
+ * Dashboard Page
+ * ───────────────────────────────────────────── */
 export default function DashboardPage() {
+  const [modalOpen, setModalOpen] = useState(false)
+  const [page, setPage] = useState(1)
+  const [modeFilter, setModeFilter] = useState<string | undefined>(undefined)
+  const pageSize = 9
+
+  // Real-time: auto-refresh when any project changes in the DB
+  useDashboardRealtime()
+
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+  } = useProjects({ page, page_size: pageSize, mode: modeFilter })
+
+  const projects = data?.items ?? []
+  const total = data?.total ?? 0
+  const hasMore = data?.has_more ?? false
+  const showingFrom = projects.length ? (page - 1) * pageSize + 1 : 0
+  const showingTo = showingFrom + projects.length - (projects.length ? 1 : 0)
+
   return (
     <main className="flex-1 w-full overflow-y-auto">
       <div className="mx-auto max-w-7xl px-6 py-10 md:px-10 md:py-8 flex flex-col gap-8">
@@ -128,12 +112,14 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* Import button (light-mode extra action) */}
             <button className="hidden sm:flex items-center justify-center h-10 px-4 rounded-lg border border-border bg-background text-muted-foreground text-sm font-medium hover:bg-muted transition-colors">
               <Upload className="size-4 mr-2" />
               Import
             </button>
-            <button className="flex items-center justify-center h-10 px-5 rounded-lg bg-cf-primary text-black text-sm font-bold shadow-sm hover:brightness-110 transition-colors active:scale-95">
+            <button
+              onClick={() => setModalOpen(true)}
+              className="flex items-center justify-center h-10 px-5 rounded-lg bg-cf-primary text-black text-sm font-bold shadow-sm hover:brightness-110 transition-colors active:scale-95"
+            >
               <Plus className="size-5 mr-2" />
               New Project
             </button>
@@ -143,17 +129,38 @@ export default function DashboardPage() {
         {/* ── Filters & Controls ── */}
         <div className="flex flex-wrap items-center gap-3 pb-2 border-b border-border">
           <div className="flex items-center gap-2">
-            <button className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-card border border-border text-sm font-medium text-foreground hover:border-muted-foreground/40 transition-colors">
+            <button
+              onClick={() => { setModeFilter(undefined); setPage(1) }}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                !modeFilter
+                  ? 'bg-card border border-border text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
               All Projects
               <span className="bg-muted text-muted-foreground text-xs py-0.5 px-1.5 rounded-md">
-                {projects.length}
+                {total}
               </span>
             </button>
-            <button className="px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-              Favorites
+            <button
+              onClick={() => { setModeFilter('builder'); setPage(1) }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                modeFilter === 'builder'
+                  ? 'bg-card border border-border text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Builder
             </button>
-            <button className="px-3 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
-              Archived
+            <button
+              onClick={() => { setModeFilter('student'); setPage(1) }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                modeFilter === 'student'
+                  ? 'bg-card border border-border text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              Student
             </button>
           </div>
 
@@ -172,38 +179,82 @@ export default function DashboardPage() {
           </div>
         </div>
 
-        {/* ── Project Grid ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {projects.map((project) => (
-            <ProjectCard key={project.id} {...project} />
-          ))}
-          <CreateProjectCard />
-        </div>
-
-        {/* ── Pagination ── */}
-        <div className="flex items-center justify-between border-t border-border pt-6 pb-2">
-          <p className="text-sm text-muted-foreground">
-            Showing{' '}
-            <span className="font-medium text-foreground">1</span> to{' '}
-            <span className="font-medium text-foreground">
-              {projects.length}
-            </span>{' '}
-            of{' '}
-            <span className="font-medium text-foreground">12</span> results
-          </p>
-          <div className="flex gap-2">
+        {/* ── Content ── */}
+        {isLoading ? (
+          <div className="flex items-center justify-center py-20">
+            <Loader2 className="size-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : isError ? (
+          <div className="flex flex-col items-center justify-center py-20 gap-3 text-center">
+            <AlertCircle className="size-10 text-red-500" />
+            <p className="text-sm text-muted-foreground max-w-md">
+              {error instanceof Error ? error.message : 'Failed to load projects. Please try again.'}
+            </p>
+          </div>
+        ) : projects.length === 0 && !modeFilter ? (
+          /* Empty state — no projects at all */
+          <div className="flex flex-col items-center justify-center py-20 gap-4 text-center">
+            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
+              <Server className="size-8 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-lg font-semibold text-foreground">No projects yet</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Create your first project to get started.
+              </p>
+            </div>
             <button
-              disabled
-              className="px-3 py-2 rounded-lg border border-border bg-card text-muted-foreground text-sm font-medium disabled:opacity-50"
+              onClick={() => setModalOpen(true)}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-cf-primary text-black text-sm font-bold hover:brightness-110 transition-colors"
             >
-              Previous
-            </button>
-            <button className="px-3 py-2 rounded-lg border border-border bg-card text-foreground text-sm font-medium hover:bg-muted transition-colors">
-              Next
+              <Plus className="size-5" />
+              New Project
             </button>
           </div>
-        </div>
+        ) : (
+          <>
+            {/* ── Project Grid ── */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {projects.map((project) => (
+                <ProjectCard key={project.id} {...toCardProps(project)} />
+              ))}
+              <CreateProjectCard onClick={() => setModalOpen(true)} />
+            </div>
+
+            {/* ── Pagination ── */}
+            {total > pageSize && (
+              <div className="flex items-center justify-between border-t border-border pt-6 pb-2">
+                <p className="text-sm text-muted-foreground">
+                  Showing{' '}
+                  <span className="font-medium text-foreground">{showingFrom}</span> to{' '}
+                  <span className="font-medium text-foreground">{showingTo}</span>{' '}
+                  of{' '}
+                  <span className="font-medium text-foreground">{total}</span> results
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    className="px-3 py-2 rounded-lg border border-border bg-card text-muted-foreground text-sm font-medium disabled:opacity-50 hover:bg-muted transition-colors"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    disabled={!hasMore}
+                    onClick={() => setPage((p) => p + 1)}
+                    className="px-3 py-2 rounded-lg border border-border bg-card text-foreground text-sm font-medium disabled:opacity-50 hover:bg-muted transition-colors"
+                  >
+                    Next
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
+
+      {/* ── Create Project Modal ── */}
+      <CreateProjectModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </main>
   )
 }

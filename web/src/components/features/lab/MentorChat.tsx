@@ -1,7 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { Brain, Send, MoreVertical, User } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Brain, Send, MoreVertical, User, Loader2 } from 'lucide-react'
+import { useRunAgent, useJobStream } from '@/lib/hooks/use-agents'
 
 /* ─── Message types ─── */
 interface ChatMessage {
@@ -53,16 +54,122 @@ const lightMessages: ChatMessage[] = [
   },
 ]
 
+export interface MentorChatProps {
+  /** Project ID for agent API calls */
+  projectId?: string
+}
+
 /**
  * MentorChat — Right-side AI Mentor panel for the Module Lab.
  *
- * **Dark**: Pedagogy Agent header (violet gradient avatar, online badge),
- *           chat bubbles with rounded corners, "Need a hint?" link, text input.
- * **Light**: AI Mentor header with icon, rounded-2xl chat bubbles with avatars,
- *            action buttons inside AI messages, input with send.
+ * Wired to the pedagogy agent: sends user messages via useRunAgent,
+ * streams responses via SSE useJobStream. Falls back to demo messages
+ * when no projectId is provided.
  */
-export function MentorChat() {
+export function MentorChat({ projectId }: MentorChatProps) {
   const [input, setInput] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [isProcessing, setIsProcessing] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  const runAgent = useRunAgent()
+
+  // SSE streaming for pedagogy agent responses
+  const { latestEvent, isConnected } = useJobStream(activeJobId)
+
+  // React to SSE events
+  useEffect(() => {
+    if (!latestEvent) return
+
+    if (latestEvent.status === 'completed') {
+      const result = (latestEvent as { result?: Record<string, unknown> }).result
+      const responseText = result?.encouragement
+        ? String(result.encouragement)
+        : result?.key_concept
+          ? String(result.key_concept)
+          : 'I\'ve analyzed your code. Keep going!'
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          text: responseText,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ])
+      setActiveJobId(null)
+      setIsProcessing(false)
+    } else if (latestEvent.status === 'failed') {
+      const error = (latestEvent as { error?: string }).error ?? 'Unknown error'
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: 'ai',
+          text: `Sorry, I encountered an error: ${error}`,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        },
+      ])
+      setActiveJobId(null)
+      setIsProcessing(false)
+    }
+  }, [latestEvent])
+
+  const scrollToBottom = useCallback(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [])
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages, scrollToBottom])
+
+  const handleSend = useCallback(() => {
+    if (!input.trim() || !projectId || isProcessing) return
+
+    const userMsg: ChatMessage = {
+      role: 'user',
+      text: input.trim(),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    }
+    setMessages((prev) => [...prev, userMsg])
+    setInput('')
+    setIsProcessing(true)
+
+    runAgent.mutate(
+      {
+        project_id: projectId,
+        agent_type: 'pedagogy',
+        input_context: { message: input.trim() },
+      },
+      {
+        onSuccess: (resp) => {
+          setActiveJobId(resp.job_id)
+        },
+        onError: () => {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: 'ai',
+              text: 'Sorry, I couldn\'t process your request. Please try again.',
+              time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            },
+          ])
+          setIsProcessing(false)
+        },
+      },
+    )
+  }, [input, projectId, isProcessing, runAgent])
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  // Show real messages if we have them, otherwise demo data
+  const displayDarkMessages = messages.length > 0 ? messages : darkMessages
+  const displayLightMessages = messages.length > 0 ? messages : lightMessages
 
   return (
     <>
@@ -86,7 +193,7 @@ export function MentorChat() {
 
         {/* Messages */}
         <div className="flex-1 p-4 overflow-y-auto custom-scrollbar space-y-4 bg-zinc-950">
-          {darkMessages.map((msg, i) =>
+          {displayDarkMessages.map((msg, i) =>
             msg.role === 'ai' ? (
               <div key={i} className="flex flex-col gap-1 items-start">
                 <div
@@ -118,19 +225,24 @@ export function MentorChat() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask for a hint..."
-              className="w-full bg-zinc-900 border border-zinc-700 rounded-sm py-2.5 pl-3 pr-10 text-sm text-foreground placeholder-zinc-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all"
+              onKeyDown={handleKeyDown}
+              disabled={isProcessing}
+              placeholder={isProcessing ? 'Thinking...' : 'Ask for a hint...'}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-sm py-2.5 pl-3 pr-10 text-sm text-foreground placeholder-zinc-500 focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500 transition-all disabled:opacity-50"
             />
             <button
-              className="absolute right-2 top-2 text-zinc-500 hover:text-violet-400 transition-colors"
+              onClick={handleSend}
+              disabled={isProcessing || !input.trim()}
+              className="absolute right-2 top-2 text-zinc-500 hover:text-violet-400 transition-colors disabled:opacity-30"
               aria-label="Send message"
             >
-              <Send className="size-5" />
+              {isProcessing ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
             </button>
           </div>
           <p className="text-[10px] text-zinc-600 text-center mt-2">
             AI can make mistakes. Check important info.
           </p>
+          <div ref={messagesEndRef} />
         </div>
       </aside>
 
@@ -155,7 +267,7 @@ export function MentorChat() {
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-transparent to-white/30">
-          {lightMessages.map((msg, i) =>
+          {displayLightMessages.map((msg, i) =>
             msg.role === 'ai' ? (
               <div key={i} className="flex gap-3">
                 <div className="size-8 rounded-full bg-blue-600/10 flex items-center justify-center shrink-0">
@@ -218,14 +330,18 @@ export function MentorChat() {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask a question..."
-              className="w-full pl-4 pr-10 py-2.5 bg-muted/50 border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 placeholder-muted-foreground shadow-inner"
+              onKeyDown={handleKeyDown}
+              disabled={isProcessing}
+              placeholder={isProcessing ? 'Thinking...' : 'Ask a question...'}
+              className="w-full pl-4 pr-10 py-2.5 bg-muted/50 border border-border rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-600 focus:border-blue-600 placeholder-muted-foreground shadow-inner disabled:opacity-50"
             />
             <button
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-blue-600 hover:bg-blue-50 rounded-full transition-colors"
+              onClick={handleSend}
+              disabled={isProcessing || !input.trim()}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-blue-600 hover:bg-blue-50 rounded-full transition-colors disabled:opacity-30"
               aria-label="Send message"
             >
-              <Send className="size-5" />
+              {isProcessing ? <Loader2 className="size-5 animate-spin" /> : <Send className="size-5" />}
             </button>
           </div>
         </div>

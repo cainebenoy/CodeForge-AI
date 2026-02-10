@@ -1,3 +1,6 @@
 export { SkillTreeHeader } from './SkillTreeHeader'
+export type { SkillTreeHeaderProps } from './SkillTreeHeader'
 export { SkillTreeCanvas } from './SkillTreeCanvas'
+export type { SkillTreeCanvasProps } from './SkillTreeCanvas'
 export { ModuleSidebar } from './ModuleSidebar'
+export type { ModuleSidebarProps } from './ModuleSidebar'

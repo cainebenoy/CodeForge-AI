@@ -1,162 +1,122 @@
+'use client'
+
+import { useCallback, useRef } from 'react'
+import Editor, { type OnMount } from '@monaco-editor/react'
+import { useTheme } from 'next-themes'
+import { useBuilderStore } from '@/store/useBuilderStore'
+import { useUpdateFile } from '@/lib/hooks/use-files'
+import { FileCode } from 'lucide-react'
+
+/** Map file extensions to Monaco language identifiers */
+function getLanguage(filePath: string): string {
+  const ext = filePath.split('.').pop()?.toLowerCase() ?? ''
+  const map: Record<string, string> = {
+    ts: 'typescript',
+    tsx: 'typescript',
+    js: 'javascript',
+    jsx: 'javascript',
+    json: 'json',
+    css: 'css',
+    html: 'html',
+    md: 'markdown',
+    py: 'python',
+    yaml: 'yaml',
+    yml: 'yaml',
+    sh: 'shell',
+    bash: 'shell',
+    sql: 'sql',
+    graphql: 'graphql',
+    dockerfile: 'dockerfile',
+  }
+  return map[ext] ?? 'plaintext'
+}
+
 /**
- * EditorPane — Static code display for the Builder IDE.
- * Will be replaced by Monaco Editor integration; serves as the visual shell.
- * Shows different syntax highlighting for light vs dark mode via the
- * syn-* CSS classes defined in globals.css.
+ * EditorPane — Monaco Editor integrated code editor.
+ *
+ * Reads the active file from Zustand store, renders it in Monaco,
+ * and debounce-saves changes back to the store + API.
  */
-export function EditorPane() {
+export function EditorPane({ projectId }: { projectId: string }) {
+  const activeFile = useBuilderStore((s) => s.activeFile)
+  const generatedFiles = useBuilderStore((s) => s.generatedFiles)
+  const updateStoreFile = useBuilderStore((s) => s.updateFile)
+  const { resolvedTheme } = useTheme()
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { mutate: saveToApi } = useUpdateFile(projectId)
+
+  const content = activeFile ? (generatedFiles[activeFile] ?? '') : ''
+  const language = activeFile ? getLanguage(activeFile) : 'plaintext'
+
+  const handleEditorMount: OnMount = (editor) => {
+    // Focus editor on mount
+    editor.focus()
+  }
+
+  const handleChange = useCallback(
+    (value: string | undefined) => {
+      if (!activeFile || value === undefined) return
+
+      // Update Zustand store immediately
+      updateStoreFile(activeFile, value)
+
+      // Debounced save to API (1.5s after last keystroke)
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = setTimeout(() => {
+        saveToApi({
+          path: activeFile,
+          payload: { content: value, language },
+        })
+      }, 1500)
+    },
+    [activeFile, updateStoreFile, saveToApi, language],
+  )
+
+  // Empty state when no file is selected
+  if (!activeFile) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-background dark:bg-black text-muted-foreground gap-4">
+        <FileCode className="size-16 opacity-20" />
+        <p className="text-sm">Select a file to start editing</p>
+        <p className="text-xs text-muted-foreground/60">
+          or run an agent to generate code
+        </p>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex-1 overflow-auto custom-scrollbar font-mono text-sm leading-6 flex relative bg-background dark:bg-black">
-      {/* Line Numbers */}
-      <div className="w-12 shrink-0 text-right pr-3 select-none py-4 text-muted-foreground/50 border-r border-border/30">
-        {Array.from({ length: 25 }, (_, i) => (
-          <div key={i + 1}>{i + 1}</div>
-        ))}
-      </div>
-
-      {/* Code Area */}
-      <div className="flex-1 p-4 whitespace-pre text-foreground">
-        <span className="syn-keyword">import</span> {'{ useState }'}{' '}
-        <span className="syn-keyword">from</span>{' '}
-        <span className="syn-string">&apos;react&apos;</span>
-        {'\n'}
-        <span className="syn-keyword">import</span> reactLogo{' '}
-        <span className="syn-keyword">from</span>{' '}
-        <span className="syn-string">&apos;./assets/react.svg&apos;</span>
-        {'\n'}
-        <span className="syn-keyword">import</span>{' '}
-        <span className="syn-string">&apos;./App.css&apos;</span>
-        {'\n\n'}
-        <span className="syn-comment">
-          {'// This component handles the main counter functionality'}
-        </span>
-        {'\n'}
-        <span className="syn-keyword">function</span>{' '}
-        <span className="syn-function">App</span>() {'{'}
-        {'\n'}
-        {'  '}
-        <span className="syn-keyword">const</span> [count, setCount] ={' '}
-        <span className="syn-function">useState</span>(
-        <span className="syn-variable">0</span>)
-        {'\n\n'}
-        {'  '}
-        <span className="syn-keyword">return</span> (
-        {'\n'}
-        {'    <'}
-        <span className="syn-tag">div</span>{' '}
-        <span className="syn-attr">className</span>=
-        <span className="syn-string">&quot;App&quot;</span>
-        {'>'}
-        {'\n'}
-        {'      <'}
-        <span className="syn-tag">div</span>
-        {'>'}
-        {'\n'}
-        {'        <'}
-        <span className="syn-tag">a</span>{' '}
-        <span className="syn-attr">href</span>=
-        <span className="syn-string">&quot;https://vitejs.dev&quot;</span>{' '}
-        <span className="syn-attr">target</span>=
-        <span className="syn-string">&quot;_blank&quot;</span>
-        {'>'}
-        {'\n'}
-        {'          <'}
-        <span className="syn-tag">img</span>{' '}
-        <span className="syn-attr">src</span>=
-        <span className="syn-string">&quot;/vite.svg&quot;</span>{' '}
-        <span className="syn-attr">className</span>=
-        <span className="syn-string">&quot;logo&quot;</span>{' '}
-        <span className="syn-attr">alt</span>=
-        <span className="syn-string">&quot;Vite logo&quot;</span>
-        {' />'}
-        {'\n'}
-        {'        </'}
-        <span className="syn-tag">a</span>
-        {'>'}
-        {'\n'}
-        {'        <'}
-        <span className="syn-tag">a</span>{' '}
-        <span className="syn-attr">href</span>=
-        <span className="syn-string">&quot;https://reactjs.org&quot;</span>{' '}
-        <span className="syn-attr">target</span>=
-        <span className="syn-string">&quot;_blank&quot;</span>
-        {'>'}
-        {'\n'}
-        {'          <'}
-        <span className="syn-tag">img</span>{' '}
-        <span className="syn-attr">src</span>
-        ={'{'} reactLogo {'}'}{' '}
-        <span className="syn-attr">className</span>=
-        <span className="syn-string">&quot;logo react&quot;</span>
-        {' />'}
-        {'\n'}
-        {'        </'}
-        <span className="syn-tag">a</span>
-        {'>'}
-        {'\n'}
-        {'      </'}
-        <span className="syn-tag">div</span>
-        {'>'}
-        {'\n'}
-        {'      <'}
-        <span className="syn-tag">h1</span>
-        {'>'}Vite + React{'</'}
-        <span className="syn-tag">h1</span>
-        {'>'}
-        {'\n'}
-        {'      <'}
-        <span className="syn-tag">div</span>{' '}
-        <span className="syn-attr">className</span>=
-        <span className="syn-string">&quot;card&quot;</span>
-        {'>'}
-        {'\n'}
-        {'        <'}
-        <span className="syn-tag">button</span>{' '}
-        <span className="syn-attr">onClick</span>
-        {'={() => '}
-        <span className="syn-function">setCount</span>
-        {'((count) => count + '}
-        <span className="syn-variable">1</span>
-        {')}>'}
-        {'\n'}
-        {'          count is {count}'}
-        <span className="animate-pulse bg-cf-primary/80 w-[2px] h-4 inline-block align-middle ml-0.5" />
-        {'\n'}
-        {'        </'}
-        <span className="syn-tag">button</span>
-        {'>'}
-        {'\n'}
-        {'      </'}
-        <span className="syn-tag">div</span>
-        {'>'}
-        {'\n'}
-        {'    </'}
-        <span className="syn-tag">div</span>
-        {'>'}
-        {'\n'}
-        {'  )'}
-        {'\n'}
-        {'}'}
-        {'\n\n'}
-        <span className="syn-keyword">export default</span>{' '}
-        <span className="syn-function">App</span>
-      </div>
-
-      {/* Minimap mock (dark mode only) */}
-      <div className="w-16 shrink-0 bg-black/30 border-l border-border/20 hidden lg:dark:block opacity-60 pointer-events-none">
-        {[8, 10, 6, 0, 10, 8, 12, 10].map((w, i) =>
-          w === 0 ? (
-            <div key={i} className="h-4" />
-          ) : (
-            <div
-              key={i}
-              className="h-1 bg-muted-foreground/20 my-1 mx-auto rounded"
-              style={{ width: `${w * 4}px` }}
-            />
-          )
-        )}
-        <div className="h-20 w-full bg-muted/10 my-2" />
-      </div>
+    <div className="flex-1 overflow-hidden bg-background dark:bg-black">
+      <Editor
+        height="100%"
+        language={language}
+        value={content}
+        theme={resolvedTheme === 'dark' ? 'vs-dark' : 'light'}
+        onChange={handleChange}
+        onMount={handleEditorMount}
+        options={{
+          fontSize: 14,
+          fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+          lineNumbers: 'on',
+          minimap: { enabled: true },
+          scrollBeyondLastLine: false,
+          wordWrap: 'on',
+          tabSize: 2,
+          automaticLayout: true,
+          bracketPairColorization: { enabled: true },
+          smoothScrolling: true,
+          cursorBlinking: 'smooth',
+          cursorSmoothCaretAnimation: 'on',
+          padding: { top: 12, bottom: 12 },
+          renderWhitespace: 'selection',
+          suggest: { preview: true },
+        }}
+        loading={
+          <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+            Loading editor...
+          </div>
+        }
+      />
     </div>
   )
 }

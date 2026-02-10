@@ -1,16 +1,34 @@
 'use client'
 
-import { CheckCircle, Play, Rocket } from 'lucide-react'
+import { CheckCircle, Play, Rocket, Loader2 } from 'lucide-react'
+
+export interface LabFooterProps {
+  /** Project ID for running tests */
+  projectId?: string
+  /** Callback for run tests */
+  onRunTests?: () => void
+  /** Callback for submit solution */
+  onSubmit?: () => void
+  /** Whether tests are currently running */
+  isTesting?: boolean
+  /** Test results */
+  testResults?: { passed: number; total: number }
+}
 
 /**
  * LabFooter — Bottom action bar for the Module Lab.
  *
- * **Dark**: Test-passing counter (0/3), Run Tests (violet outline),
- *           Submit Solution (emerald solid) buttons.
- * **Light**: System Ready status dot, Run Tests (outline),
- *            Submit Solution (primary solid) buttons.
+ * Accepts optional callbacks for test running and submission.
  */
-export function LabFooter() {
+export function LabFooter({
+  projectId,
+  onRunTests,
+  onSubmit,
+  isTesting = false,
+  testResults,
+}: LabFooterProps) {
+  const passedCount = testResults?.passed ?? 0
+  const totalCount = testResults?.total ?? 3
   return (
     <footer
       className="h-16 shrink-0 z-10 border-t flex items-center justify-between px-6
@@ -22,7 +40,7 @@ export function LabFooter() {
         {/* Dark */}
         <div className="hidden dark:flex items-center gap-2 text-muted-foreground">
           <CheckCircle className="size-[18px] text-emerald-500" />
-          <span className="text-xs font-mono">Tests Passing: 0/3</span>
+          <span className="text-xs font-mono">Tests Passing: {passedCount}/{totalCount}</span>
         </div>
         {/* Light */}
         <div className="flex dark:hidden items-center gap-2">

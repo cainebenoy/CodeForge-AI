@@ -1,3 +1,6 @@
+'use client'
+
+import { useEffect, useRef } from 'react'
 import {
   LabHeader,
   InstructionPanel,
@@ -5,29 +8,62 @@ import {
   MentorChat,
   LabFooter,
 } from '@/components/features/lab'
+import { useProject } from '@/lib/hooks/use-project'
+import { useRoadmap, useCreateSession } from '@/lib/hooks/use-student'
+import { useStudentStore } from '@/store/useStudentStore'
+import { useParams } from 'next/navigation'
 
 /**
  * Module Lab page — interactive coding environment with AI mentor.
  *
- * **Dark**: Zinc-950 workspace — instruction sidebar (objectives + checkboxes),
- *           SQL code editor with terminal, Pedagogy Agent chat, action footer.
- * **Light**: White workspace — task panel with tabs, Python code editor with
- *            console output, AI Mentor chat with action buttons, action footer.
+ * Wire up with project data, roadmap module info, and session tracking.
+ * Falls back to demo data when API unavailable.
  *
  * Route: /dashboard/lab/[projectId]
  */
 export default function LabPage() {
+  const params = useParams<{ projectId: string }>()
+  const projectId = params.projectId
+
+  const { data: project } = useProject(projectId)
+  const { data: roadmap } = useRoadmap(projectId)
+  const createSession = useCreateSession(projectId)
+
+  // Set active project in student store for sidebar context
+  const setActiveProjectId = useStudentStore((s) => s.setActiveProjectId)
+  const currentModuleIndex = useStudentStore((s) => s.currentModuleIndex)
+
+  useEffect(() => {
+    if (projectId) {
+      setActiveProjectId(projectId)
+    }
+  }, [projectId, setActiveProjectId])
+
+  // Track session start time for duration calculation
+  const sessionStartRef = useRef(Date.now())
+
+  // Get current module from roadmap
+  const currentModule = roadmap?.modules?.[currentModuleIndex]
+
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
-      <LabHeader />
+      <LabHeader
+        projectTitle={project?.title}
+        moduleTitle={currentModule?.title}
+        moduleProgress={currentModule ? ((currentModuleIndex + 1) / (roadmap?.modules?.length ?? 1)) * 100 : undefined}
+      />
 
       <main className="flex flex-1 overflow-hidden w-full">
-        <InstructionPanel />
+        <InstructionPanel
+          module={currentModule}
+        />
         <CodeEditor />
-        <MentorChat />
+        <MentorChat
+          projectId={projectId}
+        />
       </main>
 
-      <LabFooter />
+      <LabFooter projectId={projectId} />
     </div>
   )
 }

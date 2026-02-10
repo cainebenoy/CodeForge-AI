@@ -7,6 +7,7 @@ import {
   Lock,
   X,
   Route,
+  Loader2,
 } from 'lucide-react'
 import { ChoiceCard, type ChoiceOption } from './ChoiceCard'
 
@@ -90,15 +91,52 @@ const lightChoices: ChoiceOption[] = [
   },
 ]
 
+export interface ChoiceModalProps {
+  /** Project ID for context */
+  projectId?: string
+  /** API-sourced options; falls back to demo data */
+  apiOptions?: ChoiceOption[]
+  /** Custom title from API; overrides default */
+  title?: string
+  /** Called with selected option ID on confirm */
+  onConfirm?: (optionId: string) => void
+  /** Called on cancel */
+  onCancel?: () => void
+  /** Disable buttons while submitting */
+  isSubmitting?: boolean
+}
+
 /**
  * ChoiceModal — Full "Choice Framework" overlay used in Student Mode.
+ *
+ * Accepts real API data via `apiOptions` prop, falling back to built-in demo data.
  *
  * **Dark**: glass panel with XP/difficulty, "Confirm Selection" CTA.
  * **Light**: white paper card with progress stepper, "Lock in Choice" CTA.
  */
-export function ChoiceModal() {
-  const [darkSelected, setDarkSelected] = useState<string>('supabase')
-  const [lightSelected, setLightSelected] = useState<string>('observer')
+export function ChoiceModal({
+  projectId,
+  apiOptions,
+  title,
+  onConfirm,
+  onCancel,
+  isSubmitting = false,
+}: ChoiceModalProps) {
+  // Use API data if available, otherwise demo data
+  const effectiveDarkChoices = apiOptions ?? darkChoices
+  const effectiveLightChoices = apiOptions ?? lightChoices
+
+  const [darkSelected, setDarkSelected] = useState<string>(effectiveDarkChoices[0]?.id ?? 'supabase')
+  const [lightSelected, setLightSelected] = useState<string>(
+    effectiveLightChoices.find((o) => o.recommended || o.selected)?.id ?? effectiveLightChoices[0]?.id ?? 'observer'
+  )
+
+  const handleConfirm = () => {
+    // Determine which selection to use based on theme
+    // We pass both; the parent can check which is visible
+    const selectedId = document.documentElement.classList.contains('dark') ? darkSelected : lightSelected
+    onConfirm?.(selectedId)
+  }
 
   return (
     <div className="w-full max-w-5xl flex flex-col overflow-hidden
@@ -135,14 +173,14 @@ export function ChoiceModal() {
           <div className="max-w-3xl dark:text-center dark:mx-auto">
             {/* Dark title */}
             <h1 className="hidden dark:block text-3xl md:text-4xl font-bold text-white mb-2 tracking-tight">
-              Choose your Database Architecture
+              {title ?? 'Choose your Database Architecture'}
             </h1>
             <p className="hidden dark:block text-muted-foreground text-lg max-w-2xl mx-auto">
               Select the backend infrastructure that best fits your project goals. This decision will shape your code structure.
             </p>
             {/* Light title */}
             <h1 className="dark:hidden text-3xl sm:text-4xl font-bold text-foreground tracking-tight mb-3">
-              Select Architecture Strategy
+              {title ?? 'Select Architecture Strategy'}
             </h1>
             <p className="dark:hidden text-lg text-muted-foreground font-light leading-relaxed">
               Which pattern best solves the data flow problem in this module?
@@ -163,7 +201,7 @@ export function ChoiceModal() {
       <div className="px-8 py-4 sm:px-12 flex-grow">
         {/* Dark-mode cards */}
         <div className="hidden dark:grid grid-cols-1 md:grid-cols-3 gap-6">
-          {darkChoices.map((opt) => (
+          {effectiveDarkChoices.map((opt) => (
             <ChoiceCard
               key={opt.id}
               option={{ ...opt, selected: opt.id === darkSelected, recommended: opt.badgeVariant === 'recommended' }}
@@ -174,7 +212,7 @@ export function ChoiceModal() {
 
         {/* Light-mode cards */}
         <div className="grid dark:hidden grid-cols-1 md:grid-cols-3 gap-6">
-          {lightChoices.map((opt) => (
+          {effectiveLightChoices.map((opt) => (
             <ChoiceCard
               key={opt.id}
               option={{ ...opt, selected: opt.id === lightSelected }}
@@ -190,27 +228,45 @@ export function ChoiceModal() {
         <span className="text-xs text-muted-foreground font-mono hidden sm:inline-block">
           ARCH_ID: 884-2A-DB-SELECT
         </span>
-        <button className="px-6 py-2.5 rounded-lg border border-border text-foreground font-medium hover:bg-muted transition-colors text-sm">
+        <button
+          onClick={onCancel}
+          className="px-6 py-2.5 rounded-lg border border-border text-foreground font-medium hover:bg-muted transition-colors text-sm"
+        >
           Cancel
         </button>
-        <button className="px-8 py-2.5 rounded-lg bg-cf-primary text-black font-bold shadow-[0_0_15px_rgba(19,236,109,0.4)] hover:shadow-[0_0_25px_rgba(19,236,109,0.6)] hover:brightness-110 transition-all text-sm flex items-center gap-2">
+        <button
+          onClick={handleConfirm}
+          disabled={isSubmitting}
+          className="px-8 py-2.5 rounded-lg bg-cf-primary text-black font-bold shadow-[0_0_15px_rgba(19,236,109,0.4)] hover:shadow-[0_0_25px_rgba(19,236,109,0.6)] hover:brightness-110 transition-all text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : null}
           Confirm Selection
-          <ArrowRight className="size-4" />
+          {!isSubmitting && <ArrowRight className="size-4" />}
         </button>
       </div>
 
       {/* Light footer */}
       <div className="flex dark:hidden px-8 py-8 sm:px-12 mt-4 bg-muted/30 border-t border-border flex-col-reverse sm:flex-row items-center justify-between gap-6">
-        <button className="text-muted-foreground hover:text-foreground font-medium text-sm transition-colors flex items-center gap-2 group">
+        <button
+          onClick={onCancel}
+          className="text-muted-foreground hover:text-foreground font-medium text-sm transition-colors flex items-center gap-2 group"
+        >
           <ArrowLeft className="size-4 group-hover:-translate-x-1 transition-transform" />
           Review Lesson Material
         </button>
         <div className="flex items-center gap-4 w-full sm:w-auto">
-          <button className="hidden sm:block text-muted-foreground hover:bg-muted px-6 py-3 rounded-lg font-semibold transition-colors">
+          <button
+            onClick={onCancel}
+            className="hidden sm:block text-muted-foreground hover:bg-muted px-6 py-3 rounded-lg font-semibold transition-colors"
+          >
             Cancel
           </button>
-          <button className="w-full sm:w-auto bg-violet-600 hover:bg-violet-700 text-white px-8 py-3 rounded-lg font-bold shadow-lg shadow-violet-600/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2">
-            <Lock className="size-4" />
+          <button
+            onClick={handleConfirm}
+            disabled={isSubmitting}
+            className="w-full sm:w-auto bg-violet-600 hover:bg-violet-700 text-white px-8 py-3 rounded-lg font-bold shadow-lg shadow-violet-600/25 transition-all active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isSubmitting ? <Loader2 className="size-4 animate-spin" /> : <Lock className="size-4" />}
             Lock in Choice
           </button>
         </div>
