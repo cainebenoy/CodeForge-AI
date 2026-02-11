@@ -9,15 +9,22 @@ import {
   Rocket,
   Settings,
   Bell,
+  Github,
 } from 'lucide-react'
 import { ThemeToggle } from '@/components/shared/ThemeToggle'
+import { GitHubExportModal } from './GitHubExportModal'
+
+interface BuilderHeaderProps {
+  projectName: string
+  projectId?: string
+}
 
 /**
  * BuilderHeader — Top nav bar for the Builder IDE.
  * Dark: terminal-style with editor/preview toggle + Run button
  * Light: VS-Code-style with breadcrumb + Run Build / Deploy
  */
-export function BuilderHeader({ projectName }: { projectName: string }) {
+export function BuilderHeader({ projectName, projectId }: BuilderHeaderProps) {
   return (
     <header className="h-14 shrink-0 z-20 flex items-center justify-between px-4 border-b border-border bg-background">
       {/* Left: Logo + mode label */}
@@ -97,6 +104,20 @@ export function BuilderHeader({ projectName }: { projectName: string }) {
           <Rocket className="size-4" />
           <span className="text-xs font-bold">Deploy</span>
         </button>
+
+        {/* GitHub Export */}
+        {projectId && (
+          <GitHubExportModal
+            projectId={projectId}
+            projectName={projectName}
+            trigger={
+              <button className="flex items-center justify-center h-8 px-3 bg-muted hover:bg-muted/80 text-foreground rounded-lg transition-colors gap-2 border border-border">
+                <Github className="size-4" />
+                <span className="hidden sm:inline text-xs font-medium">Export</span>
+              </button>
+            }
+          />
+        )}
 
         <div className="h-6 w-px bg-border mx-1" />
 

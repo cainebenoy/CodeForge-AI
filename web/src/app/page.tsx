@@ -6,6 +6,8 @@ import { HeroTerminal } from '@/components/features/landing/HeroTerminal'
 import { HeroCodeBlock } from '@/components/features/landing/HeroCodeBlock'
 import { TrustedBy } from '@/components/features/landing/TrustedBy'
 import { FeatureGrid } from '@/components/features/landing/FeatureGrid'
+import { DemoVideo } from '@/components/features/landing/DemoVideo'
+import { WaitlistBanner } from '@/components/features/landing/WaitlistForm'
 import { Footer } from '@/components/features/landing/Footer'
 
 export default function HomePage() {
@@ -125,10 +127,16 @@ export default function HomePage() {
           <TrustedBy />
         </section>
 
+        {/* Demo Video section */}
+        <DemoVideo />
+
         {/* Feature grid (both modes) */}
         <section className="px-4 sm:px-6 lg:px-8 pb-20">
           <FeatureGrid />
         </section>
+
+        {/* Waitlist signup banner */}
+        <WaitlistBanner />
       </main>
 
       <Footer />

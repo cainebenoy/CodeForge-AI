@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Code2, Github, Loader2, AlertCircle } from 'lucide-react'
 import { useSearchParams } from 'next/navigation'
@@ -14,7 +14,8 @@ import { useSearchParams } from 'next/navigation'
  * Security: OAuth redirect uses server-side callback (/auth/callback)
  * which exchanges code for session via cookie-based auth.
  */
-export default function LoginPage() {
+
+function LoginContent() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const searchParams = useSearchParams()
@@ -46,6 +47,58 @@ export default function LoginPage() {
   }
 
   return (
+    <>
+      {/* Error messages */}
+      {(error || authError) && (
+        <div className="mb-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
+          <AlertCircle className="size-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
+          <p className="text-sm text-red-600 dark:text-red-400">
+            {error || 'Authentication failed. Please try again.'}
+          </p>
+        </div>
+      )}
+
+      {/* GitHub OAuth button */}
+      <button
+        onClick={handleGitHubLogin}
+        disabled={loading}
+        className="flex w-full items-center justify-center gap-3 rounded-md px-4 py-3
+                   font-semibold text-sm transition-all
+                   dark:bg-white dark:text-black dark:hover:bg-zinc-200
+                   bg-zinc-900 text-white hover:bg-zinc-800
+                   disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {loading ? (
+          <Loader2 className="size-5 animate-spin" />
+        ) : (
+          <Github className="size-5" />
+        )}
+        {loading ? 'Redirecting to GitHub...' : 'Continue with GitHub'}
+      </button>
+
+      <p className="mt-4 text-center text-xs text-muted-foreground">
+        By signing in, you agree to our Terms of Service and Privacy Policy.
+      </p>
+    </>
+  )
+}
+
+function LoginFallback() {
+  return (
+    <button
+      disabled
+      className="flex w-full items-center justify-center gap-3 rounded-md px-4 py-3
+                 font-semibold text-sm transition-all bg-zinc-900 text-white
+                 dark:bg-white dark:text-black opacity-50 cursor-not-allowed"
+    >
+      <Loader2 className="size-5 animate-spin" />
+      Loading...
+    </button>
+  )
+}
+
+export default function LoginPage() {
+  return (
     <div className="flex flex-col items-center gap-8">
       {/* Logo */}
       <div className="flex items-center gap-3">
@@ -68,37 +121,9 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Error messages */}
-        {(error || authError) && (
-          <div className="mb-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-900/20">
-            <AlertCircle className="size-4 text-red-600 dark:text-red-400 mt-0.5 shrink-0" />
-            <p className="text-sm text-red-600 dark:text-red-400">
-              {error || 'Authentication failed. Please try again.'}
-            </p>
-          </div>
-        )}
-
-        {/* GitHub OAuth button */}
-        <button
-          onClick={handleGitHubLogin}
-          disabled={loading}
-          className="flex w-full items-center justify-center gap-3 rounded-md px-4 py-3
-                     font-semibold text-sm transition-all
-                     dark:bg-white dark:text-black dark:hover:bg-zinc-200
-                     bg-zinc-900 text-white hover:bg-zinc-800
-                     disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          {loading ? (
-            <Loader2 className="size-5 animate-spin" />
-          ) : (
-            <Github className="size-5" />
-          )}
-          {loading ? 'Redirecting to GitHub...' : 'Continue with GitHub'}
-        </button>
-
-        <p className="mt-4 text-center text-xs text-muted-foreground">
-          By signing in, you agree to our Terms of Service and Privacy Policy.
-        </p>
+        <Suspense fallback={<LoginFallback />}>
+          <LoginContent />
+        </Suspense>
       </div>
 
       {/* Back to landing */}

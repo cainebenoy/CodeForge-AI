@@ -116,16 +116,16 @@
 | Test Suite          | 297 tests, 15 test files                                  |
 | Test Status         | All passing                                               |
 
-## Remaining Frontend Work
+## Frontend Implementation ✅ COMPLETE
 
-The backend is feature-complete. Remaining frontend implementation:
+All frontend features have been implemented:
 
-1. **Builder Mode UI:** SpecViewer, FileTree, Monaco Editor integration
-2. **Student Mode UI:** Roadmap Kanban, Choice Framework cards, Mentor Chat
-3. **Real-Time Integration:** Subscribe to `agent_jobs` Realtime + SSE streaming
-4. **GitHub Export UI:** OAuth flow + export button
-5. **Sandpack Integration:** Client-side code execution for Student Mode
-6. **Landing Page:** Demo video, waitlist/subscription
+1. **Builder Mode UI:** ✅ SpecViewer (functional with tabs/collapsible sections), BuilderFileTree, Monaco Editor integration, GitHub Export Modal
+2. **Student Mode UI:** ✅ Roadmap Kanban (SkillTreeCanvas), Choice Framework cards, Mentor Chat, Sandpack code sandbox
+3. **Real-Time Integration:** ✅ Subscribe to `agent_jobs` Realtime + SSE streaming via hooks
+4. **GitHub Export UI:** ✅ GitHubExportModal with PAT input, repo name, visibility toggle
+5. **Sandpack Integration:** ✅ SandpackWrapper for in-browser code execution
+6. **Landing Page:** ✅ DemoVideo section (with placeholder for video), WaitlistForm/WaitlistBanner for email capture
 
 ## Checklist for Success
 

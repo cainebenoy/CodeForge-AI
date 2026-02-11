@@ -60,12 +60,14 @@ export const useStudentStore = create<StudentStore>()(
           choices: state.choices,
           completedSteps: Array.from(state.completedSteps),
         }),
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        merge: (persisted: any, current) => ({
-          ...current,
-          ...(persisted as Partial<StudentStore>),
-          completedSteps: new Set(persisted?.completedSteps ?? []),
-        }),
+        merge: (persisted, current) => {
+          const p = persisted as Partial<StudentStore> & { completedSteps?: string[] }
+          return {
+            ...current,
+            ...p,
+            completedSteps: new Set(p?.completedSteps ?? []),
+          }
+        },
       },
     ),
     { name: 'student-store' },

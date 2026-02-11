@@ -54,7 +54,7 @@ export default function BuilderProjectPage({
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background text-foreground">
       {/* ── Header ── */}
-      <BuilderHeader projectName={project?.title ?? 'Untitled'} />
+      <BuilderHeader projectName={project?.title ?? 'Untitled'} projectId={projectId} />
 
       {/* ── Main IDE Body ── */}
       <div className="flex flex-1 min-h-0">
