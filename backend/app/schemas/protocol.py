@@ -96,7 +96,19 @@ class JobStatus(BaseModel):
         default=0.0, ge=0.0, le=100.0, description="Completion percentage"
     )
     created_at: datetime
-    completed_at: Optional[datetime] = None
+
+class ChatMessage(BaseModel):
+    """Chat message schema"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    project_id: str
+    role: Literal["user", "assistant", "system"]
+    content: str
+    is_thinking: bool = False
+    created_at: datetime
+    metadata: Optional[Dict[str, Any]] = None
 
 
 class ProjectCreate(BaseModel):

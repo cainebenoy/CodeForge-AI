@@ -102,6 +102,16 @@ async def run_agent(
                 if hasattr(request.agent_type, "value")
                 else request.agent_type,
             )
+
+            # Log User Message to Chat (Realtime)
+            user_msg_content = request.input_context.get("user_message")
+            if user_msg_content and isinstance(user_msg_content, str):
+                await DatabaseOperations.create_chat_message(
+                    project_id=request.project_id,
+                    role="user",
+                    content=user_msg_content,
+                )
+
         except Exception as db_err:
             logger.warning(f"Could not persist job to DB: {db_err}")
 

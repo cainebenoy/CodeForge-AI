@@ -108,6 +108,19 @@ async def run_agent_workflow(
                 },
             )
 
+        # Log Result to Chat (Realtime)
+        try:
+            chat_content = _format_result_for_chat(request.agent_type, result_dict)
+            await DatabaseOperations.create_chat_message(
+                project_id=request.project_id,
+                role="assistant",
+                content=chat_content,
+                metadata={"agent_type": request.agent_type, "job_id": job_id},
+            )
+        except Exception as chat_err:
+            logger.warning(f"Failed to log chat message: {chat_err}")
+
+
         logger.info(f"Agent workflow completed: job={job_id}")
         return result_dict
 
@@ -182,6 +195,21 @@ async def run_builder_pipeline(
 
         await DatabaseOperations.update_project(project_id, update_data)
 
+        # Log Result to Chat (Realtime)
+        try:
+            chat_content = _format_result_for_chat(
+                "builder", {"iterations": final_state.get("iteration_count", 0)}
+            )
+            await DatabaseOperations.create_chat_message(
+                project_id=project_id,
+                role="assistant",
+                content=chat_content,
+                metadata={"agent_type": "builder", "job_id": job_id},
+            )
+        except Exception as chat_err:
+            logger.warning(f"Failed to log builder chat message: {chat_err}")
+
+
         logger.info(f"Builder pipeline completed: job={job_id}")
         return {
             "requirements_spec": final_state.get("requirements_spec"),
@@ -199,7 +227,51 @@ async def run_builder_pipeline(
     except AgentExecutionError:
         raise
 
-    except Exception as e:
         error_msg = f"Builder pipeline failed: {str(e)}"
         logger.error(f"Error in job {job_id}: {error_msg}")
         raise AgentExecutionError("builder", error_msg)
+
+
+def _format_result_for_chat(agent_type: str, result: Dict[str, Any]) -> str:
+    """Format agent result into a user-friendly chat message."""
+    if agent_type == "research":
+        return (
+            "## Research Complete\n\n"
+            "I have finished the research and generated a requirements specification. "
+            "You can view the details in the Project Requirements tab."
+        )
+    
+    if agent_type == "wireframe":
+        return (
+            "## Wireframes Created\n\n"
+            "I have designed the application architecture and wireframes. "
+            "Check the Design tab to see the proposed structure."
+        )
+
+    if agent_type == "code":
+        summary = result.get("summary", "Code generation complete.")
+        files = result.get("files", [])
+        return (
+            f"## Code Generated\n\n{summary}\n\n"
+            f"I have created or updated {len(files)} files."
+        )
+
+    if agent_type == "qa":
+        score = result.get("score", 0)
+        summary = result.get("summary", "QA review complete.")
+        return (
+            f"## QA Review Complete\n\n"
+            f"**Quality Score: {score}/100**\n\n{summary}"
+        )
+
+    if agent_type == "builder":
+        # Builder pipeline result
+        iterations = result.get("iterations", 0)
+        return (
+            f"## Project Built\n\n"
+            f"I have successfully built the application after {iterations} iterations "
+            "of coding and quality assurance.\n\n"
+            "The source code is now available in the File Explorer."
+        )
+
+    return f"## {agent_type.capitalize()} Agent Complete\n\nTask finished successfully."

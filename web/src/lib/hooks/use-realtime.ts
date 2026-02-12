@@ -121,3 +121,43 @@ export function useDashboardRealtime() {
     }
   }, [queryClient])
 }
+
+/**
+ * Generic hook for subscribing to a single table/filter
+ * as per the Integration Guide.
+ */
+export function useRealtimeSubscription(
+  table: string,
+  filter: string,
+  queryKey: string[] | readonly string[],
+  event: 'INSERT' | 'UPDATE' | 'DELETE' | '*' = '*'
+) {
+  const queryClient = useQueryClient()
+  const channelRef = useRef<RealtimeChannel | null>(null)
+
+  useEffect(() => {
+    const supabase = createClient()
+    const channelName = `sub-${table}-${filter.replace(/[^a-zA-Z0-9]/g, '')}`
+
+    const channel = supabase
+      .channel(channelName)
+      .on(
+        'postgres_changes',
+        { event, schema: 'public', table, filter },
+        (payload) => {
+          // console.debug(`[Realtime] ${event} on ${table}`, payload)
+          queryClient.invalidateQueries({ queryKey })
+        }
+      )
+      .subscribe()
+
+    channelRef.current = channel
+
+    return () => {
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current)
+        channelRef.current = null
+      }
+    }
+  }, [table, filter, JSON.stringify(queryKey), event, queryClient])
+}

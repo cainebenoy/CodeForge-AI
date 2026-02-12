@@ -42,7 +42,7 @@ def get_optimal_model(agent_type: AgentType):
     elif agent_type == "code":
         # Large context for full file awareness (1M tokens)
         return ChatGoogleGenerativeAI(
-            model="gemini-1.5-pro",
+            model="gemini-1.5-flash",
             temperature=0.3,
             google_api_key=settings.GOOGLE_API_KEY,
         )

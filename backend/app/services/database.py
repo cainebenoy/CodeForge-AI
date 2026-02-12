@@ -800,23 +800,19 @@ class DatabaseOperations:
         error: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Update an agent job's status/progress in the DB.
-        Triggers Supabase Realtime notification to connected frontends.
+        Update an existing agent job.
         """
-        update_data: Dict[str, Any] = {}
-        if status is not None:
-            update_data["status"] = status
-        if progress is not None:
-            update_data["progress"] = progress
-        if result is not None:
-            update_data["result"] = result
-        if error is not None:
-            update_data["error"] = error
-
-        if not update_data:
-            raise ValidationError("data", "No valid fields to update")
-
         try:
+            update_data: Dict[str, Any] = {}
+            if status:
+                update_data["status"] = status
+            if progress is not None:
+                update_data["progress"] = progress
+            if result:
+                update_data["result"] = result
+            if error:
+                update_data["error"] = error
+
             response = await _db_execute(
                 lambda: (
                     supabase_client.table("agent_jobs")
@@ -827,14 +823,49 @@ class DatabaseOperations:
             )
 
             if response.data:
-                logger.debug(f"Updated agent job: {job_id}")
+                logger.info(f"Updated agent job: {job_id}")
                 return response.data[0]
-            raise ResourceNotFoundError("AgentJob", job_id)
-        except (ResourceNotFoundError, ValidationError):
-            raise
+            raise ExternalServiceError("Supabase", "Failed to update agent job")
         except Exception as e:
             logger.error(f"Error updating agent job: {str(e)}")
             raise ExternalServiceError("Supabase", str(e))
+
+    @staticmethod
+    async def create_chat_message(
+        project_id: str,
+        role: str,
+        content: str,
+        is_thinking: bool = False,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Create a new chat message.
+        """
+        try:
+            response = await _db_execute(
+                lambda: (
+                    supabase_client.table("chat_messages")
+                    .insert(
+                        {
+                            "project_id": project_id,
+                            "role": role,
+                            "content": content,
+                            "is_thinking": is_thinking,
+                            "metadata": metadata or {},
+                        }
+                    )
+                    .execute()
+                )
+            )
+
+            if response.data:
+                logger.info(f"Created chat message for project: {project_id}")
+                return response.data[0]
+            raise ExternalServiceError("Supabase", "Failed to create chat message")
+        except Exception as e:
+            logger.error(f"Error creating chat message: {str(e)}")
+            # Don't fail the request if chat logging fails, just log it
+            return {}
 
     @staticmethod
     async def get_agent_job(

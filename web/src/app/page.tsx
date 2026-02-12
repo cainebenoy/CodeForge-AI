@@ -7,6 +7,7 @@ import { HeroCodeBlock } from '@/components/features/landing/HeroCodeBlock'
 import { TrustedBy } from '@/components/features/landing/TrustedBy'
 import { FeatureGrid } from '@/components/features/landing/FeatureGrid'
 import { DemoVideo } from '@/components/features/landing/DemoVideo'
+import { Pricing } from '@/components/features/landing/Pricing'
 import { WaitlistBanner } from '@/components/features/landing/WaitlistForm'
 import { Footer } from '@/components/features/landing/Footer'
 
@@ -134,6 +135,9 @@ export default function HomePage() {
         <section className="px-4 sm:px-6 lg:px-8 pb-20">
           <FeatureGrid />
         </section>
+
+        {/* Pricing section */}
+        <Pricing />
 
         {/* Waitlist signup banner */}
         <WaitlistBanner />

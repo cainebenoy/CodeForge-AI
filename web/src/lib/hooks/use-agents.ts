@@ -24,6 +24,33 @@ export const jobKeys = {
   detail: (jobId: string) => [...jobKeys.all, 'detail', jobId] as const,
 }
 
+export const chatKeys = {
+  list: (projectId: string) => ['chat', projectId] as const,
+}
+
+/**
+ * Get chat history for a project.
+ */
+export function useProjectChat(projectId: string) {
+  return useQuery({
+    queryKey: chatKeys.list(projectId),
+    queryFn: async () => {
+      const { createClient } = await import('@/lib/supabase/client')
+      const supabase = createClient()
+      const { data, error } = await supabase
+        .from('chat_messages')
+        .select('*')
+        .eq('project_id', projectId)
+        .order('created_at', { ascending: true })
+      
+      if (error) throw error
+      return data as import('@/types/api.types').ChatMessage[]
+    },
+    enabled: !!projectId,
+  })
+}
+
+
 /**
  * Get the status of a single agent job.
  * Auto-refetches every 3s while the job is running or queued.

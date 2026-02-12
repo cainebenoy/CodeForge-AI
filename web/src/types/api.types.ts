@@ -360,3 +360,14 @@ export interface SSEWaitingEvent {
 }
 
 export type SSEEvent = SSEProgressEvent | SSECompleteEvent | SSEErrorEvent | SSEWaitingEvent
+
+export interface ChatMessage {
+  id: string
+  project_id: string
+  role: 'user' | 'assistant' | 'system'
+  content: string
+  is_thinking: boolean
+  created_at: string
+  metadata?: Record<string, unknown>
+}
+

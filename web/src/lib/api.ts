@@ -51,6 +51,7 @@ apiClient.interceptors.request.use(
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.access_token) {
         config.headers.Authorization = `Bearer ${session.access_token}`
+        config.headers['X-User-ID'] = session.user.id
       }
     } catch {
       // If Supabase client fails (SSR), skip token
