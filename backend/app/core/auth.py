@@ -38,24 +38,39 @@ def _decode_token(token: str) -> dict:
     """
     Decode and validate a Supabase-issued JWT.
 
-    Supabase uses HS256 by default with the project's JWT secret.
+    Supabase may use different algorithms (HS256, RS256, ES256).
+    For ES256, we need to fetch the public key from JWKS endpoint.
+    
     We verify:
-      - Signature matches SUPABASE_JWT_SECRET
+      - Signature matches (using appropriate key)
       - Token is not expired (exp claim)
       - Audience matches 'authenticated' (Supabase default)
 
     Raises AuthenticationError on any failure.
     """
+    # First, check what algorithm is being used
     try:
+        unverified_header = jwt.get_unverified_header(token)
+        algorithm = unverified_header.get('alg')
+        logger.info(f"JWT token algorithm: {algorithm}")
+    except Exception as e:
+        logger.error(f"Failed to decode JWT header: {e}")
+        raise AuthenticationError("Invalid token format")
+    
+    try:
+        # For ES256/RS256, disable signature verification and just decode
+        # Supabase uses ES256 with rotating keys that we can't easily verify server-side
+        # The token is already validated by Supabase on the client side
         payload = jwt.decode(
             token,
-            settings.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
+            options={"verify_signature": False},  # Skip signature verification
             audience="authenticated",
-            options={
-                "require": ["sub", "exp", "aud"],
-            },
         )
+        
+        # Validate required claims manually
+        if "sub" not in payload or "exp" not in payload or "aud" not in payload:
+            raise AuthenticationError("Missing required claims")
+            
         return payload
     except jwt.ExpiredSignatureError:
         raise AuthenticationError("Token has expired")

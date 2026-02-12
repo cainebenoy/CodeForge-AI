@@ -71,8 +71,13 @@ export function useProjectRealtime(projectId: string | null) {
     channelRef.current = channel
 
     return () => {
-      supabase.removeChannel(channel)
-      channelRef.current = null
+      // Only remove if channel exists and is subscribed
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current).catch(() => {
+          // Ignore errors during cleanup (e.g., already disconnected)
+        })
+        channelRef.current = null
+      }
     }
   }, [projectId, queryClient])
 }
@@ -106,8 +111,13 @@ export function useDashboardRealtime() {
     channelRef.current = channel
 
     return () => {
-      supabase.removeChannel(channel)
-      channelRef.current = null
+      // Only remove if channel exists
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current).catch(() => {
+          // Ignore errors during cleanup
+        })
+        channelRef.current = null
+      }
     }
   }, [queryClient])
 }
