@@ -63,24 +63,25 @@ export function WaitlistForm({
     setIsSubmitting(true)
 
     try {
-      // TODO: Replace with actual API call when backend endpoint is ready
-      // await fetch('/api/waitlist', { method: 'POST', body: JSON.stringify({ email }) })
-      
-      // Simulate API call
-      await new Promise((resolve) => setTimeout(resolve, 1000))
+      // Use backend endpoint
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'}/v1/waitlist/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email }),
+      })
 
-      // Store in localStorage as fallback until backend is ready
-      const waitlist = JSON.parse(localStorage.getItem('codeforge_waitlist') || '[]')
-      if (!waitlist.includes(email)) {
-        waitlist.push(email)
-        localStorage.setItem('codeforge_waitlist', JSON.stringify(waitlist))
+      if (!response.ok) {
+        throw new Error('Failed to join waitlist')
       }
 
       setIsSubmitted(true)
       setEmail('')
 
-      toast.success('You\'re on the list!', 'We\'ll notify you when new features are available.')
+      toast.success("You're on the list!", "We'll notify you when new features are available.")
     } catch (err) {
+      console.error(err)
       setError('Something went wrong. Please try again.')
       toast.error('Submission failed', 'Please try again later.')
     } finally {

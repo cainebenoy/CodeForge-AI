@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChoiceModal } from '@/components/features/student'
 import { useChoiceFramework, useSelectChoice, useStudentProgress } from '@/lib/hooks/use-student'
@@ -71,6 +71,36 @@ export default function StudentProjectPage({
     [],
   )
 
+  const [hasFetched, setHasFetched] = useState(false)
+
+  // Trigger fetch when progress is ready
+  useEffect(() => {
+    if (progress && !choiceData && !hasFetched && !choiceFramework.isPending && !choiceFramework.data) {
+        setHasFetched(true)
+        // Fetch choice framework for the current context
+        choiceFramework.mutate({ 
+            decision_context: `Module ${progress.current_module ?? 0} Architecture`,
+            module_index: progress.current_module ?? 0
+        })
+    }
+  }, [progress, choiceData, hasFetched, choiceFramework])
+
+  // Update local state when data arrives
+  useEffect(() => {
+    if (choiceFramework.data) {
+        const mappedOptions = mapApiOptions(
+            choiceFramework.data.options, 
+            choiceFramework.data.recommendation
+        )
+        setChoiceData({
+            context: choiceFramework.data.context,
+            options: mappedOptions,
+            recommendation: choiceFramework.data.recommendation
+        })
+    }
+  }, [choiceFramework.data, mapApiOptions])
+
+
   const handleSelect = useCallback(
     async (optionId: string) => {
       const moduleIndex = progress?.current_module ?? 0
@@ -93,11 +123,11 @@ export default function StudentProjectPage({
   return (
     <div className="relative h-screen overflow-hidden bg-background text-foreground flex flex-col">
       {/* ════════════════════════════════════════════════
-          DARK-MODE BACKGROUND — dimmed & non-interactive
+          BACKGROUND — dimmed & non-interactive
          ════════════════════════════════════════════════ */}
-      <div className="hidden dark:flex flex-col h-full">
-        {/* Dimmed top nav */}
-        <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-secondary opacity-40 pointer-events-none select-none">
+      <div className="flex flex-col h-full opacity-20 dark:opacity-100 dark:brightness-50 grayscale dark:grayscale-0 transition-all duration-700">
+        {/* Top nav */}
+        <header className="flex items-center justify-between px-6 py-3 border-b border-border bg-secondary pointer-events-none select-none">
           <div className="flex items-center gap-4">
             <div className="size-6 text-cf-primary">
               <Code2 className="size-6" />
@@ -119,7 +149,7 @@ export default function StudentProjectPage({
         {/* Dimmed main: mentor chat + code preview */}
         <div className="flex flex-1 min-h-0">
           {/* Mentor Chat pane */}
-          <div className="w-1/3 border-r border-border bg-secondary flex flex-col opacity-20 pointer-events-none select-none">
+          <div className="w-1/3 border-r border-border bg-secondary flex flex-col pointer-events-none select-none">
             <div className="p-4 border-b border-border flex justify-between items-center">
               <h3 className="font-bold text-lg text-foreground">Mentor Chat</h3>
               <MoreHorizontal className="size-5 text-muted-foreground" />
@@ -160,7 +190,7 @@ export default function StudentProjectPage({
           </div>
 
           {/* Code editor pane */}
-          <div className="flex-1 bg-black flex flex-col opacity-20 pointer-events-none select-none">
+          <div className="flex-1 bg-black flex flex-col pointer-events-none select-none">
             {/* Tabs */}
             <div className="h-10 border-b border-border flex items-center px-4 gap-4 bg-secondary">
               <div className="flex items-center gap-2 px-3 py-1 bg-muted rounded-t border-t border-x border-border text-xs text-cf-primary">
