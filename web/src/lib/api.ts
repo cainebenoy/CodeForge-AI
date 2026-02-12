@@ -69,10 +69,9 @@ apiClient.interceptors.response.use(
       console.error(`Rate limited. Retry after ${retryAfter}s`)
     }
     if (error.response?.status === 401) {
-      // Only redirect in browser context
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login'
-      }
+      // Log the error but don't auto-redirect to prevent loops
+      // Let the UI components handle authentication errors gracefully
+      console.error('Unauthorized request - profile may not exist yet')
     }
     return Promise.reject(error)
   },

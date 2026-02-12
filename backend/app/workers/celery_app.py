@@ -18,6 +18,7 @@ Start monitoring:
 """
 
 import os
+import ssl
 
 from celery import Celery
 
@@ -32,6 +33,9 @@ _result_backend = os.environ.get(
     os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
 )
 _agent_timeout = int(os.environ.get("AGENT_TIMEOUT", "300"))
+
+# Detect if Redis URL uses SSL (rediss://)
+_uses_ssl = _broker_url.startswith("rediss://")
 
 celery_app = Celery(
     "codeforge",
@@ -64,3 +68,16 @@ celery_app.conf.update(
     # Retry on connection loss
     broker_connection_retry_on_startup=True,
 )
+
+# Add SSL/TLS configuration for rediss:// URLs (e.g., Upstash Redis)
+if _uses_ssl:
+    celery_app.conf.update(
+        broker_use_ssl={
+            "ssl_cert_reqs": ssl.CERT_REQUIRED,
+            "ssl_ca_certs": None,  # Use system CA bundle
+        },
+        redis_backend_use_ssl={
+            "ssl_cert_reqs": ssl.CERT_REQUIRED,
+            "ssl_ca_certs": None,
+        },
+    )
