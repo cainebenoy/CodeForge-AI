@@ -48,6 +48,7 @@ class Settings(BaseSettings):
     # CORS - HTTPS only in production
     ALLOWED_ORIGINS: List[str] = [
         "http://localhost:3000",  # Dev frontend
+        "http://127.0.0.1:3000",  # Dev frontend (IP)
         "https://codeforge.ai",  # Production frontend
     ]
 

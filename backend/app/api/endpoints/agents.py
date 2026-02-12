@@ -73,7 +73,6 @@ async def run_agent(
     - Input context recursively sanitized
     """
     job_id = str(uuid4())
-
     try:
         # Verify user owns the project before running agent
         from app.services.database import DatabaseOperations
@@ -119,35 +118,45 @@ async def run_agent(
         # Use Celery when available (persistent, survives restarts, cancellable).
         # Fall back to FastAPI BackgroundTasks for dev without Redis/Celery.
         dispatched_via = "background_task"
-        try:
-            from app.workers.tasks import execute_single_agent_task
+        
+        # SKIP Celery in development to avoid Redis connection timeouts
+        # unless explicitly configured.
+        use_celery = (
+            settings.ENVIRONMENT != "development" 
+            and (settings.CELERY_BROKER_URL and "localhost" not in settings.CELERY_BROKER_URL)
+        )
 
-            celery_result = execute_single_agent_task.delay(
-                job_id=job_id,
-                project_id=request.project_id,
-                agent_type=request.agent_type.value
-                if hasattr(request.agent_type, "value")
-                else request.agent_type,
-                input_context=sanitized_context,
-                user_id=user.id,
-            )
-            # Store Celery task ID in job for cancel/monitoring
-            job_store.update_job(
-                job_id,
-                result={"_celery_task_id": celery_result.id},
-            )
-            dispatched_via = "celery"
-        except Exception as celery_err:
-            logger.warning(
-                f"Celery dispatch failed ({celery_err}), "
-                "falling back to BackgroundTasks"
-            )
-            if background_tasks:
-                background_tasks.add_task(
-                    execute_agent_background,
+        if use_celery:
+            try:
+                from app.workers.tasks import execute_single_agent_task
+    
+                celery_result = execute_single_agent_task.delay(
                     job_id=job_id,
-                    request=request,
+                    project_id=request.project_id,
+                    agent_type=request.agent_type.value
+                    if hasattr(request.agent_type, "value")
+                    else request.agent_type,
+                    input_context=sanitized_context,
+                    user_id=user.id,
                 )
+                # Store Celery task ID in job for cancel/monitoring
+                job_store.update_job(
+                    job_id,
+                    result={"_celery_task_id": celery_result.id},
+                )
+                dispatched_via = "celery"
+            except Exception as celery_err:
+                logger.warning(
+                    f"Celery dispatch failed ({celery_err}), "
+                    "falling back to BackgroundTasks"
+                )
+
+        if dispatched_via == "background_task" and background_tasks:
+            background_tasks.add_task(
+                execute_agent_background,
+                job_id=job_id,
+                request=request,
+            )
 
         logger.info(f"Dispatched agent job {job_id} via {dispatched_via}")
 

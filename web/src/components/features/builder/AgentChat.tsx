@@ -83,7 +83,7 @@ export function AgentChat({ projectId }: { projectId: string }) {
       // We don't need to manually invalidate here because 
       // the backend write will trigger the Realtime subscription event
       
-    } catch {
+    } catch (e) {
       // Revert optimistic update on error
       queryClient.setQueryData(
         chatKeys.list(projectId),
@@ -91,7 +91,7 @@ export function AgentChat({ projectId }: { projectId: string }) {
           old?.filter((m) => m.id !== optimisticMsg.id)
       )
       // Show error toast or message
-      console.error('Failed to send message')
+      console.error('Failed to send message:', e)
     }
   }, [input, projectId, activeAgent, runAgent, queryClient])
 

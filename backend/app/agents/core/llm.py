@@ -40,11 +40,11 @@ def get_optimal_model(agent_type: AgentType):
         )
 
     elif agent_type == "code":
-        # Large context for full file awareness (1M tokens)
-        return ChatGoogleGenerativeAI(
-            model="gemini-1.5-flash",
-            temperature=0.3,
-            google_api_key=settings.GOOGLE_API_KEY,
+        # Temporary fallback to GPT-4o due to Gemini 404s
+        return ChatOpenAI(
+            model="gpt-4o",
+            temperature=0.2,
+            api_key=settings.OPENAI_API_KEY,
         )
 
     elif agent_type == "wireframe":
